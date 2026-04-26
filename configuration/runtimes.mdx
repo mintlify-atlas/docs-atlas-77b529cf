@@ -1,0 +1,220 @@
+---
+title: "Claude and Codex runtime adapters"
+description: "Wanman supports Claude Code and Codex as agent runtimes. Learn how to select, configure, and override runtime adapters per-agent or globally."
+---
+
+Wanman abstracts agent execution behind a runtime adapter interface. Both the Claude Code adapter and the Codex adapter emit the same `AgentRunEvent` stream, so the supervisor and CLI work identically regardless of which runtime is active.
+
+## Selecting a runtime
+
+There are three ways to select a runtime, applied in this order of precedence (highest first):
+
+1. **Per-agent `runtime` field in `agents.json`** — affects only that agent.
+2. **`WANMAN_RUNTIME` environment variable** — overrides every agent's runtime at startup.
+3. **Default** — `claude` when neither of the above is set.
+
+<Tabs>
+  <Tab title="Per-agent (agents.json)">
+    Set `"runtime"` on individual agents to mix Claude and Codex in the same matrix:
+
+    ```json
+    {
+      "agents": [
+        {
+          "name": "ceo",
+          "lifecycle": "24/7",
+          "model": "high",
+          "runtime": "claude",
+          "systemPrompt": "You are the CEO. Coordinate the team."
+        },
+        {
+          "name": "dev",
+          "lifecycle": "on-demand",
+          "model": "standard",
+          "runtime": "codex",
+          "systemPrompt": "You are a senior software engineer."
+        }
+      ]
+    }
+    ```
+  </Tab>
+  <Tab title="Environment variable">
+    Set `WANMAN_RUNTIME` to switch all agents at once — useful for testing or deployments that standardize on one provider:
+
+    ```bash
+    # All agents use Claude Code (default)
+    WANMAN_RUNTIME=claude wanman takeover .
+
+    # All agents use Codex
+    WANMAN_RUNTIME=codex wanman takeover .
+    ```
+
+    When `WANMAN_RUNTIME` is set it overwrites every agent's `runtime` field unconditionally, including any per-agent overrides in `agents.json`.
+  </Tab>
+  <Tab title="CLI flag">
+    Some wanman commands accept a `--runtime` flag for one-shot runs:
+
+    ```bash
+    wanman run "audit the codebase for security issues" --runtime codex
+    ```
+  </Tab>
+</Tabs>
+
+## Claude Code adapter
+
+The Claude Code adapter spawns the `claude` CLI as a child process and is the default runtime.
+
+### Spawning
+
+For each agent trigger, the adapter runs roughly:
+
+```bash
+claude \
+  --system-prompt "<agent systemPrompt + enriched protocol>" \
+  [--resume <session_id>]  # only for idle_cached agents
+  "<message prompt>"
+```
+
+The adapter streams structured events from the subprocess stdout back to the supervisor as an `AgentRunEvent` sequence.
+
+### Model selection
+
+The Claude adapter resolves the model in this order:
+
+1. `WANMAN_MODEL` environment variable (overrides all agents).
+2. The agent's `model` field in `agents.json`.
+3. Abstract tier mapping: `"high"` → latest Claude Sonnet; `"standard"` → faster/cheaper Claude default.
+
+```bash
+# Force a specific model for all Claude agents
+WANMAN_MODEL=claude-opus-4-5 wanman takeover .
+```
+
+Per-agent `baseUrl` and `apiKey` fields in `agents.json` map to `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` for that subprocess, allowing individual agents to use different endpoints or credentials.
+
+### Session resume (idle_cached)
+
+When an agent uses `"lifecycle": "idle_cached"`, the Claude adapter:
+
+1. Captures the `session_id` emitted in Claude Code's `system/init` event after the first spawn.
+2. Stores it in memory across idle periods.
+3. Passes it as `--resume <session_id>` on the next trigger, so Claude Code restores the full conversation context.
+
+If the session has been dropped by the local Claude CLI (rotated, manually deleted), the adapter detects the failure and re-spawns once without `--resume`. No agent gets permanently stranded.
+
+### Skill injection
+
+At supervisor startup, the runtime materializes `packages/core/skills/*/SKILL.md` into each agent's `~/.claude/skills/` directory. Claude Code auto-discovers these files and makes them available during the agent's session.
+
+## Codex adapter
+
+The Codex adapter spawns `@openai/codex` as a child process. It has the same `AgentRunEvent` stream contract as the Claude adapter.
+
+### Spawning
+
+```bash
+codex \
+  --model <model> \
+  --reasoning-effort <low|medium|high|xhigh> \
+  "<system prompt + message prompt>"
+```
+
+### Model selection
+
+```bash
+# Set the Codex model (only affects Codex agents)
+WANMAN_RUNTIME=codex WANMAN_CODEX_MODEL=o4-mini wanman takeover .
+```
+
+The Codex adapter resolves the model in this order:
+
+1. `WANMAN_CODEX_MODEL` — applies only to agents whose effective runtime is `codex`.
+2. The agent's `model` field in `agents.json`.
+3. Abstract tier mapping: `"high"` → Codex high-quality default; `"standard"` → Codex standard default.
+
+### Reasoning effort and fast mode
+
+Control the depth of Codex's reasoning chain via `WANMAN_CODEX_REASONING_EFFORT` (`low`/`medium`/`high`/`xhigh`), or set `WANMAN_CODEX_FAST=1` to bias toward lower-latency defaults without picking an explicit tier.
+
+```bash
+# Deep reasoning for complex tasks
+WANMAN_RUNTIME=codex WANMAN_CODEX_REASONING_EFFORT=high wanman takeover .
+
+# Low-latency mode
+WANMAN_RUNTIME=codex WANMAN_CODEX_FAST=1 wanman takeover .
+```
+
+## Comparison
+
+| Feature | Claude Code | Codex |
+|---------|-------------|-------|
+| `idle_cached` lifecycle | Yes | No |
+| Session resume | Yes (`--resume`) | No |
+| Skill injection | Yes | Yes |
+| Model override env var | `WANMAN_MODEL` | `WANMAN_CODEX_MODEL` |
+| Reasoning effort tiers | No | Yes (`WANMAN_CODEX_REASONING_EFFORT`) |
+| Fast mode | No | Yes (`WANMAN_CODEX_FAST`) |
+| Per-agent `baseUrl` override | Yes | No |
+| Per-agent `apiKey` override | Yes | No |
+
+## Example configurations
+
+<Tabs>
+  <Tab title="Claude Code">
+    ```json
+    {
+      "agents": [
+        {
+          "name": "ceo",
+          "lifecycle": "24/7",
+          "model": "high",
+          "runtime": "claude",
+          "systemPrompt": "You are the CEO. Coordinate the team and drive the project goal."
+        },
+        {
+          "name": "support",
+          "lifecycle": "idle_cached",
+          "model": "standard",
+          "runtime": "claude",
+          "systemPrompt": "You are a support agent. Remember customer context across interactions.",
+          "events": ["issue.created"]
+        }
+      ]
+    }
+    ```
+
+    Set `WANMAN_MODEL` to override the model for all Claude agents:
+
+    ```bash
+    WANMAN_MODEL=claude-opus-4-5 wanman takeover .
+    ```
+  </Tab>
+  <Tab title="Codex">
+    ```json
+    {
+      "agents": [
+        {
+          "name": "dev",
+          "lifecycle": "on-demand",
+          "model": "standard",
+          "runtime": "codex",
+          "systemPrompt": "You are a software engineer. Implement tasks as assigned."
+        }
+      ]
+    }
+    ```
+
+    Set model and reasoning effort for all Codex agents:
+
+    ```bash
+    WANMAN_RUNTIME=codex \
+      WANMAN_CODEX_MODEL=o4-mini \
+      WANMAN_CODEX_REASONING_EFFORT=high \
+      wanman takeover .
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  `idle_cached` paired with the `codex` runtime is rejected at supervisor startup, not silently degraded. If any agent in `agents.json` has `"lifecycle": "idle_cached"` and its effective runtime resolves to `codex` (via the per-agent field or `WANMAN_RUNTIME`), the supervisor exits with an error before spawning any agents.
+</Warning>

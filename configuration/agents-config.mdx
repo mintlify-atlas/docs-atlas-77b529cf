@@ -1,0 +1,176 @@
+---
+title: "agents.json configuration reference"
+description: "Configure your wanman agent matrix with agents.json: define agent roles, lifecycle modes, model tiers, cron schedules, and optional db9 brain integration."
+---
+
+The `agents.json` file is the single source of truth for your wanman matrix. It declares which agents exist, how they run, what models they use, and where state is stored. Wanman reads this file at supervisor startup — pass its path to `wanman takeover` or `wanman run`.
+
+## Top-level structure
+
+```json
+{
+  "agents": [...],
+  "dbPath": ".wanman/wanman.db",
+  "port": 3120,
+  "workspaceRoot": ".wanman/agents",
+  "gitRoot": ".",
+  "goal": "Build a production-ready REST API",
+  "brain": {
+    "token": "db9-token",
+    "dbName": "my-project"
+  }
+}
+```
+
+<ParamField body="agents" type="AgentDefinition[]" required>
+  Array of AgentDefinition objects. Each entry declares one agent in the matrix. See [Agent definition fields](#agent-definition-fields) below.
+</ParamField>
+
+<ParamField body="dbPath" type="string" default=".wanman/wanman.db">
+  Path to the SQLite database file used by the supervisor for message, task, artifact, and context stores. Relative paths are resolved from the working directory at startup.
+</ParamField>
+
+<ParamField body="port" type="number" default="3120">
+  HTTP port for the supervisor JSON-RPC server. The CLI connects to this port via `WANMAN_URL`. Change this if port 3120 is already in use on your machine.
+</ParamField>
+
+<ParamField body="workspaceRoot" type="string" default=".wanman/agents">
+  Root directory under which per-agent workspace directories are created. Each agent gets an isolated subdirectory and `$HOME` inside this root.
+</ParamField>
+
+<ParamField body="gitRoot" type="string">
+  Git root for repo-aware runs. Defaults from `workspaceRoot` when not set. Provide an explicit path when your target repo lives outside the workspace root.
+</ParamField>
+
+<ParamField body="goal" type="string">
+  Top-level goal for the CEO agent to pursue autonomously. Used with `wanman takeover` to seed the initial mission without sending a manual message.
+</ParamField>
+
+<ParamField body="brain" type="BrainConfig">
+  db9 brain adapter config for cross-run memory. Optional — omitting it disables cross-run memory mirroring. See [Brain config](#brain-config) below.
+</ParamField>
+
+## Agent definition fields
+
+Each object in the `agents` array defines one agent. The supervisor spawns a separate subprocess for each entry.
+
+```json
+{
+  "name": "ceo",
+  "lifecycle": "24/7",
+  "model": "high",
+  "systemPrompt": "You are the CEO. Coordinate the team.",
+  "runtime": "claude",
+  "crons": ["0 9 * * 1-5"],
+  "events": ["ci.build.failed"],
+  "baseUrl": "http://localhost:1234/v1",
+  "apiKey": "lm-studio-key"
+}
+```
+
+<ParamField body="name" type="string" required>
+  Unique identifier used on the message bus. `wanman send <name> <msg>` targets this value. Must be unique across all entries in the `agents` array.
+</ParamField>
+
+<ParamField body="lifecycle" type='"24/7" | "on-demand" | "idle_cached"' required>
+  Controls when and how the agent subprocess runs:
+
+  - `24/7` — continuous respawn loop. The supervisor boots a fresh CLI subprocess after each iteration ends. Use for always-on coordinator roles like a CEO agent.
+  - `on-demand` — idle until triggered by a cron, steer message, or subscribed event. Each trigger starts a fresh, stateless run.
+  - `idle_cached` — idle until triggered (like `on-demand`), but the runtime preserves the previous Claude `session_id` and resumes it on the next trigger via `claude --resume`. Combines "no CPU when idle" with "preserved conversation context". **Claude-only** — see the note in [Complete example](#complete-example).
+</ParamField>
+
+<ParamField body="model" type="string" required>
+  Abstract tier (`"high"` or `"standard"`) or a specific model ID. The runtime adapter maps abstract tiers to Claude or Codex defaults. Environment variable overrides (`WANMAN_MODEL`, `WANMAN_CODEX_MODEL`) take precedence at runtime.
+</ParamField>
+
+<ParamField body="systemPrompt" type="string" required>
+  Baked-in persona and mission statement injected at the start of every agent run. Agents also auto-discover shared skill files from `~/.claude/skills/` at runtime.
+</ParamField>
+
+<ParamField body="runtime" type='"claude" | "codex"'>
+  Runtime adapter for this agent. Overrides the global `WANMAN_RUNTIME` environment variable for this agent only. Omit to inherit the global default (`claude`).
+</ParamField>
+
+<ParamField body="crons" type="string[]">
+  Cron expressions (5-field) that trigger this agent on a schedule. Example: `["0 9 * * 1-5"]` fires at 09:00 Monday–Friday. Applies to `on-demand` and `idle_cached` agents; `24/7` agents ignore this field.
+</ParamField>
+
+<ParamField body="events" type="string[]">
+  External event types this agent subscribes to. When the supervisor receives a matching event (e.g. `ci.build.failed`), it triggers this agent with the serialized payload.
+</ParamField>
+
+<ParamField body="baseUrl" type="string">
+  Override `ANTHROPIC_BASE_URL` for this agent (e.g. an LM Studio endpoint). Useful for routing one agent to a different API gateway while others use the default Anthropic endpoint.
+</ParamField>
+
+<ParamField body="apiKey" type="string">
+  Override `ANTHROPIC_AUTH_TOKEN` for this agent. Allows different agents to authenticate with different API keys.
+</ParamField>
+
+## Complete example
+
+The following configuration runs three agents with different lifecycle strategies:
+
+```json
+{
+  "agents": [
+    {
+      "name": "ceo",
+      "lifecycle": "24/7",
+      "model": "high",
+      "systemPrompt": "You are the CEO agent. Coordinate the dev and support agents. Break down goals into tasks and delegate.",
+      "runtime": "claude",
+      "crons": ["0 8 * * 1-5"]
+    },
+    {
+      "name": "dev",
+      "lifecycle": "on-demand",
+      "model": "standard",
+      "systemPrompt": "You are a senior software engineer. Implement features, fix bugs, and write tests as assigned.",
+      "events": ["ci.build.failed"]
+    },
+    {
+      "name": "support",
+      "lifecycle": "idle_cached",
+      "model": "standard",
+      "systemPrompt": "You are a support agent. Triage incoming issues and escalate to the dev agent when needed.",
+      "runtime": "claude",
+      "events": ["issue.created", "issue.updated"]
+    }
+  ],
+  "dbPath": ".wanman/wanman.db",
+  "port": 3120,
+  "workspaceRoot": ".wanman/agents",
+  "gitRoot": ".",
+  "goal": "Build and maintain a production-ready REST API",
+  "brain": {
+    "token": "${DB9_TOKEN}",
+    "dbName": "my-project"
+  }
+}
+```
+
+<Note>
+  `idle_cached` requires the `claude` runtime. Pairing `"lifecycle": "idle_cached"` with `"runtime": "codex"` (or `WANMAN_RUNTIME=codex`) is rejected at supervisor startup. Codex has no equivalent session-resume mechanism, so wanman rejects the misconfiguration loudly rather than silently degrading to `on-demand` semantics.
+</Note>
+
+## Brain config
+
+The optional `brain` object attaches a `@sandbank.dev/db9` adapter for cross-run persistent memory. When configured, the supervisor mirrors key context into db9 so agents can retrieve knowledge from previous runs.
+
+<ParamField body="token" type="string" required>
+  db9 API token. Can also be supplied via the `DB9_TOKEN` environment variable — use `"${DB9_TOKEN}"` in `agents.json` to avoid hardcoding credentials.
+</ParamField>
+
+<ParamField body="dbName" type="string" required>
+  Database name for cross-run memory. Use a unique name per project to avoid cross-project bleed.
+</ParamField>
+
+<ParamField body="baseUrl" type="string">
+  db9 API base URL override. Omit to use the default db9.ai endpoint.
+</ParamField>
+
+<Note>
+  The brain adapter is optional — missing it just disables cross-run memory mirroring. All other supervisor features continue to work normally.
+</Note>

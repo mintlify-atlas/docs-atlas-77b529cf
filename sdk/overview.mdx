@@ -1,0 +1,127 @@
+---
+title: "Wanman Host SDK overview"
+description: "The Wanman Host SDK lets you embed the agent matrix runtime programmatically in Node.js tools, running takeovers and goals without the CLI."
+keywords: ["wanman", "host-sdk", "agent", "runtime", "node", "programmatic"]
+---
+
+The `@wanman/host-sdk` package provides a programmatic Node.js interface to the wanman agent matrix. Instead of shelling out to the `wanman` CLI, host tools can import `createWanmanHostSdk` or `createEnvBackedWanmanHostSdk` and call `run()` or `takeover()` directly.
+
+## What the Host SDK is for
+
+The Host SDK is designed for embedding wanman in environments where you need programmatic control over the agent runtime:
+
+- **CI pipelines** — trigger goal runs or takeovers as part of automated workflows, passing run options and project specs directly in code.
+- **Custom tooling** — build internal scripts, bots, or services that delegate work to the agent matrix without spawning a child process.
+- **wanman.ai** — the wanman platform itself uses the Host SDK to dispatch agent runs from the web interface.
+
+The SDK abstracts the runtime dispatch layer behind a clean interface (`WanmanHostSdk`) and lets you supply adapters that wire it to any concrete execution backend.
+
+## Main exports
+
+`@wanman/host-sdk` exports the following from its public API:
+
+| Export | Kind | Description |
+|---|---|---|
+| `createWanmanHostSdk` | function | Creates a `WanmanHostSdk` instance with explicit config and adapters. |
+| `createEnvBackedWanmanHostSdk` | function | Creates a `WanmanHostSdk` instance, reading environment variables automatically. |
+| `WanmanHostSdk` | interface | The SDK interface: `run`, `takeover`, `prepareTakeover`, `executePreparedTakeover`. |
+| `WanmanHostSdkConfig` | type | Configuration object passed to the factory functions. |
+| `WanmanHostTakeoverOptions` | type | Options for a takeover: `projectPath`, `goalOverride`, `runtime`, etc. |
+| `WanmanHostRunOptions` | type | Partial `RunOptions` accepted by `run()` and `takeover()`. |
+| `WanmanHostRunInvocation` | type | Union of `RunOptions` and `WanmanHostRunOptions`. |
+| `RunOptions` | type | Full set of runtime knobs: `loops`, `pollInterval`, `runtime`, `output`, etc. |
+| `ProjectRunSpec` | type | Per-run project descriptor: `projectDir`, `repoCloneUrl`, `githubToken`, etc. |
+| `ThreadSyncSpec` | type | Thread synchronisation options embedded in `ProjectRunSpec`. |
+| `createRunOptions` | function | Builds a `RunOptions` object by merging defaults with overrides. |
+| `createDefaultRunOptions` | function | Returns the baseline `RunOptions` defaults. |
+| `createTakeoverRunOptions` | function | Builds `RunOptions` with `infinite: true` and `loops: Infinity`. |
+| `WanmanHostSdkAdapters` | interface | Adapter interface that connects the SDK to a concrete execution backend. |
+| `WanmanHostSdkBindings` | interface | Runtime bindings (e.g., `hostEnv`) passed to adapter methods. |
+
+## Basic usage: creating the SDK and calling takeover
+
+The typical integration pattern is:
+
+1. Supply a `WanmanHostSdkAdapters` implementation that knows how to actually run the agent.
+2. Call `createWanmanHostSdk` (or `createEnvBackedWanmanHostSdk`) with optional config and the adapters.
+3. Use the returned `WanmanHostSdk` instance to call `takeover()` or `run()`.
+
+```typescript
+import {
+  createWanmanHostSdk,
+  type WanmanHostSdkAdapters,
+  type WanmanHostTakeoverOptions,
+} from '@wanman/host-sdk'
+
+// Your concrete adapter implementation
+const adapters: WanmanHostSdkAdapters<unknown, MyPlan, WanmanHostTakeoverOptions> = {
+  runGoal: async (goal, options, spec, bindings) => { /* ... */ },
+  prepareTakeoverPlan: (options) => ({ /* ... */ }) as MyPlan,
+  executePreparedTakeoverPlan: async (plan, options, bindings) => { /* ... */ },
+  normalizeTakeoverOptions: (options) => options as WanmanHostTakeoverOptions,
+}
+
+const sdk = createWanmanHostSdk({}, adapters)
+
+// Start a takeover on a local project
+await sdk.takeover({
+  projectPath: '/path/to/project',
+  goalOverride: 'Fix all TypeScript errors',
+  enableBrain: true,
+})
+```
+
+## createEnvBackedWanmanHostSdk vs createWanmanHostSdk
+
+Both factories return an identical `WanmanHostSdk` interface. The difference is in how they source configuration:
+
+| | `createWanmanHostSdk` | `createEnvBackedWanmanHostSdk` |
+|---|---|---|
+| **Env variables** | Merged from `config.env` on top of `process.env` | Passed explicitly as the first argument (defaults to `process.env`) |
+| **Use when** | You control environment construction entirely | You want to forward a specific env object, such as a filtered or augmented copy of `process.env` |
+| **Signature** | `(config?, adapters)` | `(env?, config?, adapters)` |
+
+```typescript
+import { createEnvBackedWanmanHostSdk } from '@wanman/host-sdk'
+
+// Reads from process.env by default
+const sdk = createEnvBackedWanmanHostSdk(
+  process.env,
+  {},
+  adapters,
+)
+```
+
+<Tip>
+  Use `createEnvBackedWanmanHostSdk` when you need to explicitly hand the host environment to the SDK, for example in a serverless function where you want to forward a sanitised copy of `process.env`.
+</Tip>
+
+## Two-phase takeover pattern
+
+For cases where you want to separate planning from execution — for example, to inspect or modify the plan before running it — use `prepareTakeover` and `executePreparedTakeover` separately:
+
+```typescript
+// Phase 1: build the plan (synchronous)
+const plan = sdk.prepareTakeover({
+  projectPath: '/path/to/project',
+  goalOverride: 'Refactor authentication module',
+})
+
+// Inspect or log the plan here if needed
+
+// Phase 2: execute
+await sdk.executePreparedTakeover(plan, {
+  loops: 50,
+  output: './deliverables',
+})
+```
+
+This is equivalent to calling `sdk.takeover()` directly, but gives you a synchronous checkpoint between preparation and execution.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Host SDK API reference" icon="code" href="/sdk/api-reference">
+    Full type signatures for every export: factory functions, the WanmanHostSdk interface, RunOptions, and ProjectRunSpec.
+  </Card>
+</Columns>

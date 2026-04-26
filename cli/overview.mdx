@@ -1,0 +1,78 @@
+---
+title: "wanman CLI command overview"
+description: "Complete wanman CLI command reference: every subcommand from send and task to run and takeover, plus global environment variables and help flags."
+---
+
+The `wanman` CLI is your primary interface to a running agent matrix. This page lists every command with a short description and documents the global environment variables that apply across all commands.
+
+## What wanman CLI is
+
+`wanman` is a thin JSON-RPC 2.0 client. Every subcommand serializes a request and sends it to the **supervisor** process over HTTP. The supervisor owns the message bus, task pool, context store, artifact store, and the agent process manager.
+
+```
+wanman <subcommand>  →  JSON-RPC  →  Supervisor (WANMAN_URL)
+```
+
+There is no hidden state in the CLI itself — everything lives in the supervisor's SQLite database and in the running agent processes.
+
+## Command reference
+
+| Command | What it does |
+|---------|--------------|
+| `wanman send <agent> <msg>` | Send a message to an agent. `--steer` interrupts the target with high priority. |
+| `wanman recv [--agent <name>]` | Fetch and mark pending messages as delivered. |
+| `wanman escalate <msg>` | Shorthand for `wanman send ceo --steer`. |
+| `wanman context get <key>` | Read a shared key/value pair from the context store. |
+| `wanman context set <key> <value>` | Write a shared key/value pair. |
+| `wanman agents` | List all registered agents and their current states. |
+| `wanman agents spawn <template> [name]` | Spawn a dynamic clone of an existing agent. |
+| `wanman agents destroy <name>` | Destroy a dynamic clone agent. |
+| `wanman task create …` | Create a task in the pool. Supports `--after` dependencies. |
+| `wanman task list …` | List tasks with optional filters. |
+| `wanman task get <id>` | Show full task JSON. |
+| `wanman task update <id> …` | Update task status, assignee, or result. |
+| `wanman task done <id> [result]` | Mark a task done with an optional result string. |
+| `wanman initiative create …` | Start a long-lived multi-task initiative. |
+| `wanman initiative list …` | List initiatives with optional status filter. |
+| `wanman initiative get <id>` | Show full initiative JSON. |
+| `wanman initiative update <id> …` | Update an initiative's fields. |
+| `wanman capsule create …` | Create a change capsule (PR-sized bundle). |
+| `wanman capsule list …` | List capsules with optional filters. |
+| `wanman capsule mine` | List capsules owned by the current agent. |
+| `wanman capsule get <id>` | Show full capsule JSON. |
+| `wanman capsule update <id> …` | Update capsule fields or status. |
+| `wanman artifact put …` | Store a structured artifact with kind, path, and metadata. |
+| `wanman artifact list …` | List artifacts with optional agent or kind filter. |
+| `wanman artifact get <id>` | Show a full artifact including stored content. |
+| `wanman hypothesis create …` | Create a hypothesis in the CEO's thinking tree. |
+| `wanman hypothesis list …` | List hypotheses with optional status or tree filter. |
+| `wanman hypothesis update <id> …` | Update hypothesis status and record outcome. |
+| `wanman watch` | Read loop events from the local NDJSON file. |
+| `wanman watch --history` | Query db9 for historical loop events. |
+| `wanman run <goal>` | Start an agent matrix against a one-shot goal. |
+| `wanman takeover <path>` | Take over an existing git repo with the full agent matrix. |
+| `wanman skill:check [path]` | Validate skill docs reference only real CLI commands. |
+
+## Global environment variables
+
+These environment variables apply to all commands:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WANMAN_URL` | `http://localhost:3120` | Supervisor HTTP URL the CLI sends JSON-RPC requests to. |
+| `WANMAN_AGENT_NAME` | _(none)_ | Identifies the current agent. Used as the default sender in `send`, `recv`, `task`, `artifact`, and other commands that record which agent acted. Required for `recv` when `--agent` is not given. |
+| `WANMAN_RUNTIME` | `claude` | Selects the per-agent CLI adapter — `claude` or `codex`. |
+| `WANMAN_MODEL` | _(adapter default)_ | Model override for Claude. |
+| `WANMAN_CODEX_MODEL` | _(adapter default)_ | Model override for Codex. |
+| `WANMAN_CODEX_REASONING_EFFORT` | _(adapter default)_ | Reasoning effort for Codex. |
+| `WANMAN_CODEX_FAST` | _(unset)_ | When set, biases the Codex adapter toward lower-latency defaults. |
+| `WANMAN_SKILL_SNAPSHOTS_DIR` | `$TMPDIR/wanman-skill-snapshots` | Override where the runtime writes skill-activation snapshots. |
+
+## Getting help
+
+```bash
+wanman --help
+wanman <command> --help
+```
+
+Every subcommand that supports `--help` prints its full usage, flags, and examples to stdout.

@@ -1,0 +1,85 @@
+---
+title: "Shared skills for agent guidance"
+description: "Shared skills are SKILL.md files agents auto-discover at startup. Learn how wanman materializes them, what skills ship by default, and how skill:check validates them."
+keywords: ["wanman", "skills", "SKILL.md", "agent guidance", "skill snapshots", "artifact-naming", "wanman-cli"]
+---
+
+Skills are short, structured Markdown documents that ship alongside the wanman runtime bundle. At supervisor startup, each skill is copied into every agent's home directory so Claude Code auto-discovers it — no manual configuration required.
+
+## What skills are
+
+A skill is a `SKILL.md` file inside `packages/core/skills/<skill-name>/`. The frontmatter includes a `name` and a `description`; the body contains whatever guidance you want agents to follow.
+
+```
+packages/core/skills/
+  artifact-naming/SKILL.md
+  artifact-quality/SKILL.md
+  cross-validation/SKILL.md
+  research-methodology/SKILL.md
+  wanman-cli/SKILL.md
+  workspace-conventions/SKILL.md
+```
+
+Claude Code automatically reads any Markdown files placed in `~/.claude/skills/`. wanman exploits this by materializing every skill file into each agent's isolated `$HOME` at startup, so the agent has all shared conventions available from its first run without them needing to be baked into every system prompt.
+
+## How setupSharedSkills() works
+
+When the supervisor starts, `setupSharedSkills()` in `shared-skill-manager.ts` iterates over `packages/core/skills/` and writes a copy of each `SKILL.md` into:
+
+```
+.wanman/home/<agent-name>/.claude/skills/<skill-name>/SKILL.md
+```
+
+This happens before any agent subprocess is spawned, so skills are always present by the time Claude reads them.
+
+## Skill snapshots
+
+Alongside the live copies, the supervisor also writes an **immutable snapshot** of every skill into the directory resolved by `WANMAN_SKILL_SNAPSHOTS_DIR`. If that variable is unset, the runtime falls back to a sibling of the shared-skills directory, then to `$TMPDIR/wanman-skill-snapshots`.
+
+Snapshots are tied to a specific run, so you can always audit exactly which skill version was in effect when a particular agent produced an artifact or made a decision.
+
+## Skills shipped with wanman
+
+### artifact-naming
+
+Enforces naming conventions for `wanman artifact put` calls. Defines the standard `--kind` values (`budget_item`, `market_data`, `brand_asset`, etc.) and the required `--path` format (`{domain}/{category}/{item}`). Prevents agents from inventing their own artifact taxonomy, which breaks cross-agent aggregation.
+
+### artifact-quality
+
+Sets quality standards for artifact metadata: required `source` and `confidence` fields, the source identifier format (`web_search:<domain>`, `government_data`, `estimate`, etc.), and the confidence scoring scale (0.9+ for official data, 0.1–0.3 for training-data guesses). Also specifies the format for recording cross-validation results.
+
+### cross-validation
+
+Guides the CEO agent through a consistency check after all tasks reach `done` status. Steps the CEO through collecting output files from all agents, extracting key facts (brand names, prices, dates, color values), and comparing them across documents. When inconsistencies are found, the skill instructs the CEO to defer to the earliest authoritative document and create a correction task with `wanman task create --after`.
+
+### research-methodology
+
+Establishes a five-tier data source hierarchy (official public data → authoritative media → web search → model inference → training data memory) and maps each tier to a confidence range. Reminds agents to search before estimating, cross-validate key data from at least two independent sources, and label data timeliness. Guides how to record each research data point as a wanman artifact.
+
+### wanman-cli
+
+A CLI command reference that agents read at runtime. Covers the startup protocol (read `CLAUDE.md`, `wanman recv`, check task list), all messaging commands (`send`, `recv`, `escalate`, `--steer`), task lifecycle commands, artifact put/list/get, context get/set, hypothesis tracking, and agent management. This skill is what lets agents use the wanman CLI correctly without needing exhaustive instructions in their system prompts.
+
+### workspace-conventions
+
+Defines the file-system layout agents must follow inside their workspace (`/workspace/agents/<agent-name>/`), output file naming patterns (`{topic}-report.md`, `index.html`, etc.), and how to reference another agent's output using full paths. Includes a task-completion checklist reminding agents to write artifacts, write report files, and call `wanman task done`.
+
+## Validating skill docs
+
+The `skill:check` command scans a skill directory and verifies that every CLI command mentioned in a `SKILL.md` file exists in the real wanman CLI:
+
+```bash
+# Check all skills
+wanman skill:check
+
+# Check a specific skill directory
+wanman skill:check packages/core/skills/wanman-cli
+```
+
+This catches documentation drift — for example, a skill that references a renamed subcommand — before agents start following stale guidance.
+
+## How agents use skills
+
+From the agent's perspective, skills just appear as Markdown files in `~/.claude/skills/`. Claude Code's auto-discovery mechanism reads them at session start alongside the agent's `CLAUDE.md` role guide. No special tool calls or prompting is required.
+
+Because each agent's `$HOME` is isolated under `.wanman/home/<agent>/`, one agent's skill directory cannot interfere with another's, and you can add agent-specific skills by writing directly into `.wanman/home/<agent>/.claude/skills/` without affecting any other agent.

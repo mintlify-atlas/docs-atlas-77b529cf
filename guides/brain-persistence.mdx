@@ -1,0 +1,88 @@
+---
+title: "Cross-run memory with the db9 brain adapter"
+description: "Wanman persists state in local SQLite by default. Add the optional db9 brain adapter to share memory across runs and machines with a cross-run persistent store."
+keywords: ["wanman", "db9", "brain adapter", "persistence", "SQLite", "cross-run memory", "sandbank"]
+---
+
+wanman has two persistence layers. Local SQLite is always present and covers everything that needs to survive a supervisor restart within a single workspace. The optional `@sandbank.dev/db9` brain adapter adds a second layer for state that needs to travel across runs or machines.
+
+## Local SQLite
+
+Every wanman workspace writes a single `wanman.db` file at `.wanman/wanman.db`. This is the primary store — all agent state lives here first.
+
+The following tables persist across supervisor restarts as long as `.wanman/` exists:
+
+| Table | What it stores |
+|---|---|
+| `messages` | All inter-agent messages, with delivery status and priority |
+| `context` | Shared key/value entries written via `wanman context set` |
+| `tasks` | Task pool: titles, assignees, statuses, dependencies |
+| `artifacts` | Structured outputs from `wanman artifact put`, including file contents |
+| `hypotheses` | Hypothesis lifecycle and evidence links |
+| `capsules` | Change capsules proposed by agents |
+
+Removing `.wanman/` (or just `wanman.db`) resets all local state. This is the intended cleanup path — see the [takeover guide](/guides/takeover).
+
+## db9 brain adapter
+
+The `@sandbank.dev/db9` brain adapter is an optional peer dependency. When configured, the runtime mirrors artifacts and context entries to a hosted db9 database alongside the local SQLite writes.
+
+**Use cases:**
+
+- **Fleets of supervisors** — multiple wanman instances running against different repos can read each other's artifacts and context from a shared db9 database.
+- **Post-run analysis** — after a takeover session ends and `.wanman/` is deleted, the mirrored data remains in db9 and can be queried with `wanman watch --history`.
+- **Cross-machine continuity** — spin up a new takeover on a different machine and the brain adapter re-hydrates the relevant context automatically.
+
+If the `@sandbank.dev/db9` package is not installed, the mirror is silently disabled. All local SQLite writes still succeed; only the cross-run layer is absent.
+
+## Configuring the brain adapter
+
+Add a `brain` object to your `agents.json`:
+
+```json
+{
+  "agents": [...],
+  "dbPath": ".wanman/wanman.db",
+  "port": 3120,
+  "workspaceRoot": ".wanman/agents",
+  "brain": {
+    "token": "${DB9_TOKEN}",
+    "dbName": "my-project-brain"
+  }
+}
+```
+
+- `token` — your db9 API token. Use the `DB9_TOKEN` environment variable rather than hardcoding the value.
+- `dbName` — the name of the db9 database to write to. The runtime creates the database if it does not exist.
+
+Set the token in your shell before running takeover:
+
+```bash
+export DB9_TOKEN=your_db9_token_here
+wanman takeover .
+```
+
+To disable the brain adapter for a single run without editing `agents.json`, pass `--no-brain`:
+
+```bash
+wanman takeover . --no-brain
+```
+
+## Installing the optional dependency
+
+The db9 package is not installed by default:
+
+```bash
+pnpm add @sandbank.dev/db9
+```
+
+If you run wanman without it and `agents.json` contains a `brain` block, the supervisor will surface a clear error rather than silently degrading:
+
+```
+`@sandbank.dev/db9` is not installed. Either install it as an optional dependency
+(pnpm add @sandbank.dev/db9) or run with the cloud brain disabled (--no-brain).
+```
+
+<Note>
+The db9 brain adapter is only required for cross-run and cross-machine memory. For single-machine, single-run use cases, local SQLite is sufficient and no additional configuration is needed.
+</Note>

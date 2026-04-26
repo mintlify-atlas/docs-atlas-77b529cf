@@ -1,0 +1,142 @@
+---
+title: "wanman send and recv: agent messaging"
+description: "Send messages to agents with steer or normal priority, receive and mark them delivered, escalate to the CEO, and read or write shared key-value context."
+---
+
+The `send`, `recv`, `escalate`, and `context` commands are the primary way humans and agents communicate through the wanman matrix. Messages are persisted in SQLite before `send` returns and marked delivered atomically by `recv` — no double-delivery is possible.
+
+## wanman send
+
+Send a message to a named agent.
+
+```
+wanman send <agent> <message> [--steer] [--type <message|decision|blocker>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--steer` | Deliver at `steer` priority, interrupting the agent's current work. Omit for normal priority. |
+| `--type` | Message type: `message` (default), `decision`, or `blocker`. |
+
+The sender is taken from `WANMAN_AGENT_NAME` (falls back to `cli`).
+
+### Examples
+
+```bash
+# Normal follow-up message
+wanman send dev "Please add unit tests for the parser"
+
+# Steer interrupt — highest priority
+wanman send dev "Stop. The requirements have changed." --steer
+
+# Send a decision record
+wanman send marketing "Approved: launch Q3 campaign" --type decision
+
+# Send a blocker notice
+wanman send devops "Cannot deploy — staging creds missing" --type blocker
+```
+
+Output:
+
+```
+Message a1b2c3d4 queued → dev (message, normal)
+```
+
+---
+
+## wanman recv
+
+Fetch pending messages addressed to an agent and mark them as delivered.
+
+```
+wanman recv [--agent <name>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--agent <name>` | Agent to receive messages for. Defaults to `WANMAN_AGENT_NAME`. |
+
+Up to 10 pending messages are returned per call. Each message is printed then marked delivered so it is not returned again.
+
+### Output format
+
+```
+[STEER] ceo (2026-04-26T09:00:00.000Z): Stop and re-plan.
+[message] dev (2026-04-26T09:01:00.000Z): Tests are passing now.
+[blocker] devops (2026-04-26T09:02:00.000Z): Cannot access prod.
+```
+
+The prefix tag is `[STEER]` for steer-priority messages, or `[<type>]` for all others.
+
+### Examples
+
+```bash
+# Receive as the current agent (WANMAN_AGENT_NAME must be set)
+wanman recv
+
+# Receive as a specific agent
+wanman recv --agent dev
+```
+
+---
+
+## wanman escalate
+
+Shorthand for `wanman send ceo --steer`. Delivers a steer-priority message directly to the `ceo` agent.
+
+```
+wanman escalate <message>
+```
+
+### Examples
+
+```bash
+wanman escalate "Budget has changed — re-prioritise immediately"
+```
+
+Output:
+
+```
+Escalated to CEO: a1b2c3d4 (queued)
+```
+
+A `ceo` agent must be configured in the running matrix. If no such agent exists the command exits with an error.
+
+---
+
+## wanman context
+
+Read or write shared key/value pairs in the supervisor's context store. Context is accessible to all agents and persists for the lifetime of the supervisor.
+
+### context get
+
+```
+wanman context get <key>
+```
+
+Prints the raw value of the key to stdout, or reports that the key was not found.
+
+```bash
+wanman context get project_phase
+# → planning
+```
+
+### context set
+
+```
+wanman context set <key> <value>
+```
+
+The writer is recorded as `WANMAN_AGENT_NAME` (falls back to `cli`). Multi-word values are joined with spaces — no quoting required.
+
+```bash
+wanman context set project_phase execution
+wanman context set launch_date 2026-07-01
+wanman context set owner_note "Revisit after dev finishes"
+```
+
+Output:
+
+```
+Set "project_phase" = "execution"
+```

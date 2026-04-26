@@ -1,81 +1,199 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Get started with Wanman"
+description: "Learn how to clone, build, and launch your first wanman agent matrix. Covers prerequisites, building from source, wanman takeover, and interacting with agents."
 ---
 
-## Get started in three steps
+Wanman runs a supervised network of Claude Code or Codex agents on your machine. This guide walks you through cloning the repository, building the CLI, and launching your first agent matrix with `wanman takeover`.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, make sure you have:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+<Steps>
+  <Step title="Install Node.js 20+ and pnpm 9+">
+    Wanman requires Node.js 20 or later and pnpm 9 or later.
 
-### Step 2: Deploy your changes
+    ```bash
+    # Enable pnpm via corepack
+    corepack enable && corepack prepare pnpm@9.15.0 --activate
+    ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    Verify your versions:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```bash
+    node --version   # must be 20.x or higher
+    pnpm --version   # must be 9.x or higher
+    ```
+  </Step>
+  <Step title="Install git">
+    Git is required for worktree isolation. Verify it's installed:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    git --version
+    ```
+  </Step>
+  <Step title="Authenticate Claude Code or Codex CLI">
+    Wanman spawns Claude Code or Codex as agent subprocesses and uses whatever auth they already have. Install and authenticate at least one:
 
-### Step 3: Go live
+    <Tabs>
+      <Tab title="Claude Code">
+        ```bash
+        npm install -g @anthropic-ai/claude-code
+        claude   # follow the login prompts
+        ```
+      </Tab>
+      <Tab title="Codex">
+        ```bash
+        npm install -g @openai/codex
+        # Follow the Codex CLI sign-in flow
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+## Clone, install, and build
+
+```bash
+git clone git@github.com:chekusu/wanman.git wanman.dev
+cd wanman.dev
+pnpm install
+pnpm build
+```
+
+`pnpm build` compiles all packages and produces the CLI at `packages/cli/dist/index.js`.
+
+**Option A — run directly with pnpm (no PATH setup needed):**
+
+```bash
+pnpm --filter @wanman/cli exec wanman --help
+```
+
+**Option B — link globally:**
+
+```bash
+cd packages/cli
+npm link
+wanman --help
+```
+
+**Option C — build a standalone single-file bundle:**
+
+```bash
+pnpm --filter @wanman/cli standalone
+node packages/cli/dist/wanman.mjs --help
+```
+
+## Take over a git repository
+
+Navigate to any existing git repository and run:
+
+```bash
+cd /path/to/any/git/repo
+wanman takeover .
+```
+
+What happens when you run `takeover`:
+
+<Steps>
+  <Step title="Workspace setup">
+    Wanman creates `.wanman/` inside the repo and materializes a clean worktree from `HEAD`. Agents edit this worktree — your actual working tree is never touched.
+  </Step>
+  <Step title="Supervisor starts">
+    A supervisor process starts on an auto-selected `127.0.0.1` port (default `3120`) and waits for health.
+  </Step>
+  <Step title="Agents spawn">
+    Claude Code (or Codex) subprocesses start under an isolated `.wanman/home/` so shell profile changes stay out of your real `$HOME`.
+  </Step>
+  <Step title="Stream activity">
+    Takeover stays in the foreground, streaming supervisor and agent activity to your terminal.
+  </Step>
+</Steps>
+
+To use the Codex runtime instead of Claude:
+
+```bash
+wanman takeover . --runtime codex
+```
+
+## Talk to the matrix
+
+Open a second terminal and interact with the running agents:
+
+```bash
+# List all registered agents and their current states
+wanman agents
+
+# Send a goal to the CEO agent
+wanman send ceo "Build me a sample TODO API"
+
+# Live-stream all supervisor and agent events
+wanman watch
+```
+
+Use `--steer` to interrupt whatever the agent is currently doing:
+
+```bash
+wanman send ceo --steer "Stop — focus only on the API endpoints"
+```
+
+Read replies from an agent:
+
+```bash
+wanman recv --agent ceo
+```
+
+## Inspect outputs
+
+Agents produce structured artifacts through `wanman artifact put`. Browse them:
+
+```bash
+wanman artifact list                # all artifacts, newest first
+wanman artifact list --agent ceo    # filter by producer
+wanman artifact get <id>            # full content and metadata
+```
+
+Check task progress:
+
+```bash
+wanman task list
+wanman task get <task-id>
+```
+
+## Clean up
+
+Everything wanman creates lives under `.wanman/` inside the target repo:
+
+```
+.wanman/
+  worktree/   clean checkout agents edit
+  home/       isolated $HOME for agent subprocesses
+  agents/     per-agent workspace dirs
+  wanman.db   SQLite store: messages, context, tasks, artifacts
+  logs/       supervisor and agent logs
+```
+
+Stop `wanman takeover` with `Ctrl+C`, then reset all state:
+
+```bash
+rm -rf .wanman
+```
+
+Your real working tree is untouched.
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Agent lifecycles" icon="rotate" href="/concepts/agent-lifecycles">
+    Learn about 24/7, on-demand, and idle_cached modes.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/agents-config">
+    Customize your agent matrix with agents.json.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/overview">
+    Explore all available commands and flags.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture/overview">
+    Understand how the supervisor coordinates agents.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

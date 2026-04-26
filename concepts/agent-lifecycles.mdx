@@ -1,0 +1,158 @@
+---
+title: "Agent lifecycle modes"
+description: "Wanman supports three agent lifecycle modes: 24/7 continuous respawn, on-demand triggered execution, and idle_cached context-preserving runs (Claude-only)."
+---
+
+Every agent in the wanman matrix has a `lifecycle` field in its definition that controls how and when it runs. Choosing the right lifecycle for each agent balances responsiveness, resource usage, and context continuity.
+
+## Overview
+
+| Lifecycle | CPU when idle | Context preserved | Trigger mechanism |
+|-----------|--------------|-------------------|-------------------|
+| `24/7` | Always running | No (fresh subprocess each loop) | Continuous — loops automatically |
+| `on-demand` | None | No (stateless per trigger) | Message, steer, or cron |
+| `idle_cached` | None | Yes (via `claude --resume`) | Message, steer, or cron |
+
+<Warning>
+  `idle_cached` is Claude-only. Pairing it with `runtime: codex` (or `WANMAN_RUNTIME=codex`) is rejected at supervisor startup — it will not silently fall back to `on-demand`.
+</Warning>
+
+## `24/7` — continuous respawn
+
+The `24/7` lifecycle runs a continuous loop: spawn a subprocess, wait for it to exit, sleep briefly, then respawn.
+
+```
+start()
+  +-> runLoop()
+        +- relay.recv()            -- pull pending messages
+        +- spawnClaudeOrCodex()    -- boot the CLI subprocess
+        +- wait()                  -- block until subprocess exits
+        +- sleep(RESPAWN_DELAY_MS) -- cooldown
+        +- repeat
+```
+
+If messages are pending, they become the initial prompt. Otherwise, the agent gets a default "you are alive, check your inbox" prompt. A `steer`-priority message interrupts the current subprocess via SIGKILL; the next iteration picks it up first.
+
+**Best for:** Always-on coordinating agents (like a CEO) that should continuously monitor activity and respond.
+
+```json
+{
+  "name": "ceo",
+  "lifecycle": "24/7",
+  "model": "high",
+  "systemPrompt": "You are the CEO. Continuously coordinate the team."
+}
+```
+
+## `on-demand` — idle until triggered
+
+The `on-demand` lifecycle keeps the agent idle (no subprocess, no CPU) until triggered by a steer message, a regular message, or a cron schedule.
+
+```
+start()
+  +-> state = 'idle'
+        +- trigger() or handleSteer()
+             +- relay.recv()
+             +- spawnClaudeOrCodex()
+             +- wait()
+        +- state = 'idle' again
+```
+
+Each spawn is fully stateless — the next trigger gets a fresh CLI session.
+
+**Best for:** Specialist agents (developer, devops) that only need to act when explicitly tasked.
+
+```json
+{
+  "name": "dev",
+  "lifecycle": "on-demand",
+  "model": "standard",
+  "systemPrompt": "You are the developer. Implement the task you receive."
+}
+```
+
+## `idle_cached` — idle with preserved context (Claude-only)
+
+`idle_cached` combines the zero-CPU idle profile of `on-demand` with conversation context preservation. The supervisor captures the Claude `session_id` from each run and passes it as `claude --resume <id>` on the next trigger.
+
+```
+start()
+  +-> state = 'idle'
+  +-> lastSessionId = null
+
+trigger() / handleSteer()
+  +- relay.recv()
+  +- spawnClaudeCode({ resumeSessionId: lastSessionId })
+  +- onSessionId(id => lastSessionId = id)
+  +- wait()
+  +- if resumeMissed():         -- stale/deleted session
+       lastSessionId = null
+       respawn without --resume  -- cold-start fallback
+  +- state = 'idle'
+```
+
+If the session ID has been rotated or deleted by the local Claude CLI, the supervisor detects the failure and re-spawns once without `--resume`. The agent never gets stranded.
+
+**Best for:** Stateful roles where losing context every trigger is costly but keeping a process alive forever is wasteful — for example, a support agent that should remember context between customer messages.
+
+```json
+{
+  "name": "support",
+  "lifecycle": "idle_cached",
+  "model": "standard",
+  "systemPrompt": "You are the support agent. Remember context between interactions."
+}
+```
+
+<Note>
+  `idle_cached` requires Claude Code. It depends on `claude --resume` and Claude Code's `system/init` session ID. There is no equivalent mechanism in the Codex runtime.
+</Note>
+
+## Agent states
+
+An agent can be in one of four states at any moment:
+
+| State | Meaning |
+|-------|---------|
+| `idle` | Waiting for a trigger (normal for `on-demand` and `idle_cached`). |
+| `running` | A Claude Code or Codex subprocess is currently executing. |
+| `stopped` | Manually stopped or supervisor is shutting down. |
+| `error` | Recent crash; the supervisor will retry. |
+
+Check current states with:
+
+```bash
+wanman agents
+```
+
+## Cron triggers
+
+Any agent can be woken on a schedule using the `crons` field (standard 5-field cron: `min hour dom mon dow`):
+
+```json
+{
+  "name": "reporter",
+  "lifecycle": "on-demand",
+  "model": "standard",
+  "systemPrompt": "Produce a daily status report.",
+  "crons": ["0 9 * * *"]
+}
+```
+
+The supervisor's CronScheduler checks every 60 seconds and enqueues a follow-up message (plus a steer for `on-demand` agents) when the expression matches.
+
+## Event triggers
+
+Agents can also subscribe to external events by listing event types in their `events` field:
+
+```json
+{
+  "name": "ci-watcher",
+  "lifecycle": "on-demand",
+  "model": "standard",
+  "systemPrompt": "React to CI events.",
+  "events": ["ci.build.failed", "ci.deploy.succeeded"]
+}
+```
+
+See [External events](/guides/external-events) for how to push events into the matrix.

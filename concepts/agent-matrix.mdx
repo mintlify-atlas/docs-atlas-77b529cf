@@ -1,0 +1,103 @@
+---
+title: "What is the agent matrix?"
+description: "The agent matrix is wanman's coordinated network of AI agents — each isolated in its own worktree and home — orchestrated by a local JSON-RPC supervisor."
+---
+
+The agent matrix is the heart of wanman: a coordinated network of Claude Code or Codex agents, each running in isolation, communicating through a shared message bus, and managed by a local supervisor process. Rather than running a single AI agent, wanman lets you run an entire team of specialized agents — CEO, developer, devops, marketing, feedback — that collaborate autonomously to accomplish complex goals.
+
+## The supervisor at the center
+
+All coordination flows through the **supervisor** — a local Node.js process that owns the message store, context store, task pool, artifact store, and spawns one child process per agent. The `wanman` CLI speaks JSON-RPC 2.0 to the supervisor over HTTP (default `http://localhost:3120`).
+
+```
++----------------+          +--------------------+          +-----------------+
+|  wanman CLI    |  JSON    |  Supervisor        |  spawn   |  Agent process  |
+|  (host shell)  | ---RPC-->|  (local process)   | -------> |  (Claude/Codex) |
+|                |  /rpc    |  message/context/  |          |  per-agent $HOME|
+|                |          |  task/artifact     |          |  per-agent wt   |
++----------------+          +--------------------+          +-----------------+
+                                    |                              |
+                                    v                              v
+                           +--------------------+        +-----------------+
+                           |  SQLite (wanman.db)|        |  worktree       |
+                           +--------------------+        +-----------------+
+```
+
+The CLI is intentionally thin — it has no business logic of its own. Everything interesting (process management, persistence, routing) lives in the supervisor.
+
+## Agent definitions
+
+Agents are defined in a single `agents.json` config file. Each entry declares the agent's name, lifecycle mode, runtime backend, and system prompt:
+
+```json
+{
+  "agents": [
+    {
+      "name": "ceo",
+      "lifecycle": "24/7",
+      "model": "high",
+      "systemPrompt": "You are the CEO agent. Coordinate the team toward the product goal."
+    },
+    {
+      "name": "dev",
+      "lifecycle": "on-demand",
+      "model": "standard",
+      "systemPrompt": "You are the developer agent. Implement features in the worktree."
+    }
+  ],
+  "dbPath": ".wanman/wanman.db",
+  "port": 3120,
+  "workspaceRoot": ".wanman/agents"
+}
+```
+
+## Isolation: worktrees and home directories
+
+Before spawning any agent subprocess, the supervisor sets up per-agent isolation:
+
+- **Worktree** — materialized from the current `HEAD` under `.wanman/worktree/`. Agents edit this snapshot, not your actual working tree.
+- **Per-agent `$HOME`** — under `.wanman/home/<agent>/`. Shell profile writes, `.npmrc` edits, and similar changes stay contained.
+- **Per-agent `.claude/` or `.codex/`** — under the agent's `$HOME`, so two agents don't collide on CLI state.
+
+A `wanman` wrapper inside each agent's `$PATH` presets `WANMAN_AGENT_NAME` so commands like `wanman recv` work correctly from inside the agent process.
+
+## What agents can do
+
+Within an agent run, the Claude Code or Codex subprocess can:
+
+- Edit files in its assigned worktree
+- Run terminal commands (in its isolated environment)
+- Call `wanman send` to message other agents
+- Call `wanman task create/update/done` to manage tasks
+- Call `wanman artifact put` to publish structured outputs
+- Call `wanman context set` to update shared state
+- Call `wanman initiative` and `wanman capsule` commands
+
+## State that persists
+
+All structured state lives in a single SQLite database (`wanman.db`) owned by the supervisor. It survives supervisor restarts within the same workspace:
+
+| Store | Purpose |
+|-------|---------|
+| `MessageStore` | Agent-to-agent messages with priorities |
+| `ContextStore` | Shared key/value state |
+| `TaskPool` | Tasks with statuses and dependencies |
+| `ArtifactStore` | Structured agent outputs |
+| `InitiativeBoard` | Long-lived multi-task initiatives |
+| `HypothesisPool` | Experiment-style hypotheses |
+| `ChangeCapsulePool` | Proposed change bundles |
+
+<CardGroup cols={2}>
+  <Card title="Agent lifecycles" icon="rotate" href="/concepts/agent-lifecycles">
+    24/7, on-demand, and idle_cached modes explained.
+  </Card>
+  <Card title="Messaging" icon="envelope" href="/concepts/messaging">
+    How agents send messages and interrupt each other.
+  </Card>
+  <Card title="Structured stores" icon="database" href="/concepts/stores">
+    Tasks, artifacts, initiatives, and more.
+  </Card>
+  <Card title="Architecture deep dive" icon="sitemap" href="/architecture/overview">
+    Full technical breakdown of the supervisor and adapters.
+  </Card>
+</CardGroup>

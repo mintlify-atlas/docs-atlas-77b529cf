@@ -1,0 +1,181 @@
+---
+title: "wanman artifact: store and retrieve outputs"
+description: "Store structured agent outputs as artifacts with kind, path, source, and confidence. List by agent or kind, filter unverified, and retrieve full content by ID."
+---
+
+The `wanman artifact` command manages the supervisor's artifact store — a typed, structured output layer where agents publish deliverables like research summaries, financial models, brand assets, and tech specs, with provenance metadata so downstream agents can assess quality and trust.
+
+## What artifacts are
+
+Artifacts are structured, typed outputs that agents produce and store in the supervisor's artifact store. Each artifact has:
+
+- **kind** — what type of output it represents (e.g. `competitor`, `tech_spec`, `brand_asset`).
+- **path** — a namespaced location in `{domain}/{category}/{item}` format (e.g. `market/competitors/cafe-a`).
+- **source** — where the data came from (e.g. an agent name or `"estimate"`).
+- **confidence** — a 0–1 float indicating how reliable the data is.
+- **metadata** — a free-form JSON object with additional fields.
+- **content** — optional text content (from a file or inline string).
+
+Standard kind values are enforced by default. Non-standard kinds require `--allow-nonstandard` and are flagged in metadata for downstream tooling.
+
+### Standard kinds
+
+`competitor` · `market_data` · `customer_profile` · `location_data` · `budget_item` · `revenue_forecast` · `financial_summary` · `brand_asset` · `content_plan` · `tech_spec`
+
+---
+
+## wanman artifact put
+
+Store a new artifact.
+
+```
+wanman artifact put
+  --kind <kind>
+  --path <domain/category/item>
+  --source <source>
+  --confidence <0-1>
+  [--task <task-id>]
+  [--file <file-path>]
+  [--content <text>]
+  [--allow-nonstandard]
+  '<metadata json>'
+```
+
+| Flag | Description |
+|------|-------------|
+| `--kind` | Artifact type. Must be a standard kind unless `--allow-nonstandard` is given. |
+| `--path` | Namespaced path in `{domain}/{category}/{item}` format. |
+| `--source` | Data source identifier (agent name, URL, `"estimate"`, etc.). |
+| `--confidence` | Float 0–1. `1.0` = verified fact; `0.0` = rough guess. |
+| `--task <id>` | Associate the artifact with a task ID. |
+| `--file <file-path>` | Read a file and store its text content in the artifact (up to ~10 MB). |
+| `--content <text>` | Store an inline text string. `--file` takes precedence if both are given. |
+| `--allow-nonstandard` | Allow a non-standard kind value. The artifact is flagged with `non_standard_kind: true` in metadata. |
+| `'<metadata json>'` | Required positional — a JSON object as the last argument. |
+
+The storing agent is taken from `WANMAN_AGENT_NAME` (falls back to `cli`).
+
+### Examples
+
+```bash
+# Store a market research file
+wanman artifact put \
+  --kind market_data \
+  --path "market/analysis/q2-2026" \
+  --source "research" \
+  --confidence 0.8 \
+  --file /workspace/agents/research/output/market-analysis.md \
+  '{"quarter":"Q2-2026","region":"JP"}'
+
+# Store an inline budget estimate
+wanman artifact put \
+  --kind budget_item \
+  --path "costs/opex/rent" \
+  --source "estimate" \
+  --confidence 0.4 \
+  '{"item":"rent","amount":350000,"currency":"JPY"}'
+
+# Store a brand asset attached to a task
+wanman artifact put \
+  --kind brand_asset \
+  --path "brand/identity/handbook" \
+  --source "marketing" \
+  --confidence 0.9 \
+  --task abc12345 \
+  --file /workspace/agents/marketing/output/brand-design.md \
+  '{"name":"Brand Handbook"}'
+
+# Store a non-standard kind
+wanman artifact put \
+  --kind interview_notes \
+  --allow-nonstandard \
+  --path "research/interviews/customer-01" \
+  --source "feedback" \
+  --confidence 0.7 \
+  '{"participant":"C-01"}'
+```
+
+Output:
+
+```
+Artifact stored: kind=market_data source=research confidence=0.8
+```
+
+---
+
+## wanman artifact list
+
+List stored artifacts.
+
+```
+wanman artifact list
+  [--agent <name>]
+  [--kind <kind>]
+  [--unverified]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--agent <name>` | Filter to artifacts produced by a specific agent. |
+| `--kind <kind>` | Filter to a specific kind. |
+| `--unverified` | Show only artifacts where `verified` is not set in metadata. |
+
+### Example output
+
+```
+[✓] #12 market_data (research) path=market/analysis/q2-2026 source=research confidence=0.8 [42.1KB]
+[✗] #11 budget_item (cli) path=costs/opex/rent source=estimate confidence=0.4
+[✓] #10 brand_asset (marketing) path=brand/identity/handbook source=marketing confidence=0.9 [8.3KB]
+
+3 artifact(s)
+```
+
+`[✓]` = `verified: true` in metadata; `[✗]` = not verified.
+
+### Examples
+
+```bash
+wanman artifact list
+wanman artifact list --agent research
+wanman artifact list --kind budget_item
+wanman artifact list --unverified
+```
+
+---
+
+## wanman artifact get
+
+Retrieve a single artifact by numeric ID.
+
+```
+wanman artifact get <id>
+```
+
+Prints the kind, agent, path, creation time, metadata JSON, and — if present — the full stored content.
+
+### Example
+
+```bash
+wanman artifact get 12
+```
+
+Output:
+
+```
+# Artifact #12
+kind: market_data
+agent: research
+path: market/analysis/q2-2026
+created_at: 2026-04-26T09:00:00.000Z
+metadata: {
+  "quarter": "Q2-2026",
+  "region": "JP",
+  "source": "research",
+  "confidence": 0.8
+}
+
+--- content (42.1KB) ---
+
+# Q2 2026 Market Analysis
+...
+```

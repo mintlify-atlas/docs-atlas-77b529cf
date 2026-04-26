@@ -1,0 +1,93 @@
+---
+title: "Supervisor internals: stores, relay, and scheduling"
+description: "How the wanman supervisor manages agent processes, routes messages via the Relay, schedules cron triggers, and persists all state in a single SQLite database."
+---
+
+The wanman supervisor is the central coordinator of the agent matrix. It runs as a local Node.js process and is responsible for everything that happens between the CLI and the agent subprocesses: persisting messages, spawning and restarting children, routing steers, and firing cron triggers.
+
+## Agent process management
+
+For each agent defined in `agents.json`, the supervisor creates an `AgentProcess` instance that manages the full subprocess lifecycle. The behavior depends on the agent's `lifecycle` field:
+
+**`24/7` agents** run a continuous loop:
+```
+runLoop()
+  +- relay.recv()              // pull pending messages
+  +- spawnClaudeOrCodex()      // boot the CLI subprocess
+  +- wait()                    // block until exit
+  +- sleep(RESPAWN_DELAY_MS)   // cooldown
+  +- repeat
+```
+
+**`on-demand` agents** start idle and spawn only on trigger (steer, message, or cron):
+```
+state = 'idle'
+trigger() → spawnClaudeOrCodex() → wait() → state = 'idle'
+```
+
+**`idle_cached` agents** (Claude-only) are like `on-demand` but pass the captured `session_id` to `claude --resume` on the next trigger, preserving conversation context across idle periods.
+
+## Worktree and home isolation
+
+Before the first spawn, the supervisor sets up per-agent isolation:
+
+- **Worktree** — a clean `git worktree` from `HEAD` under `.wanman/worktree/`. Agents edit this, not your real checkout.
+- **Per-agent `$HOME`** — under `.wanman/home/<agent>/`. Shell profile writes and tool state stay contained.
+- **Per-agent `.claude/` or `.codex/`** — under the agent's `$HOME`, so agent CLI states don't collide.
+
+A `wanman` wrapper inside each agent's `$PATH` presets `WANMAN_AGENT_NAME` so commands like `wanman recv` work correctly from inside the agent without extra flags.
+
+## The Relay and steer mechanism
+
+The `Relay` is the message router. When a steer-priority message arrives:
+
+1. `messageStore.enqueue()` persists it immediately.
+2. `steerCallback(agent)` fires on the target `AgentProcess`.
+3. The `AgentProcess` SIGKILLs its current child.
+4. On the next loop iteration, `relay.recv()` returns the steer message first (SQL ordering puts `steer` before `followUp`).
+
+This ensures steer messages are both durable (written before `send()` returns) and fast (current work is interrupted immediately).
+
+## CronScheduler
+
+The `CronScheduler` runs every 60 seconds. For each agent with a `crons` field, it evaluates the 5-field cron expression against the current time. On a match, it:
+
+- Enqueues a follow-up message to the agent.
+- For `on-demand` and `idle_cached` agents, also fires `handleSteer()` to wake them immediately.
+
+Standard cron syntax: `min hour dom mon dow`.
+
+## External event routing
+
+`POST /events` accepts an `ExternalEvent` object:
+
+```typescript
+interface ExternalEvent {
+  type: string
+  source: string
+  payload: Record<string, unknown>
+  timestamp: number
+}
+```
+
+The supervisor iterates all agents and, for any whose `definition.events[]` includes the event type, enqueues a follow-up message containing the serialized payload. Agents subscribe by listing event types in their `events` field in `agents.json`.
+
+## Shared skill materialization
+
+At supervisor startup, `setupSharedSkills()` (in `shared-skill-manager.ts`) copies all `packages/core/skills/*/SKILL.md` files into each agent's `~/.claude/skills/`. Claude Code auto-discovers these files and uses them to guide agent behavior. Immutable snapshot copies are written to `WANMAN_SKILL_SNAPSHOTS_DIR` for auditability.
+
+## SQLite persistence
+
+All stores are tables in a single `wanman.db` file:
+
+| Table | Contents |
+|-------|----------|
+| `messages` | Agent messages with priority, timestamp, delivered flag |
+| `context` | Key-value shared context with updater metadata |
+| `tasks` | Task items with status and dependency edges |
+| `artifacts` | Structured agent outputs with kind, path, content, metadata |
+| `initiatives` | Long-lived initiatives with status and priority |
+| `hypotheses` | Experiment hypotheses with status transitions |
+| `capsules` | PR-sized change proposals with branch and allowed paths |
+
+The file survives supervisor restarts — agents resume from exactly where they left off.

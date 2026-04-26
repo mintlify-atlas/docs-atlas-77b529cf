@@ -1,0 +1,147 @@
+---
+title: "Pushing external events into the agent matrix"
+description: "Send events to a running wanman supervisor via POST /events or the event.push RPC to trigger agents from CI pipelines, webhooks, and other external systems."
+keywords: ["wanman", "external events", "POST /events", "event.push", "CI", "webhooks", "agent triggers"]
+---
+
+External events let systems outside the agent matrix — CI pipelines, webhook providers, monitoring tools, human scripts — push structured notifications into a running supervisor. The supervisor routes each event to any agents that have subscribed to that event type.
+
+## The ExternalEvent shape
+
+Events pushed to the supervisor must conform to the `ExternalEvent` interface defined in `packages/core/src/types.ts`:
+
+```typescript
+interface ExternalEvent {
+  type: string;        // namespaced event identifier, e.g. "ci.build.failed"
+  source: string;      // identifier for the system that produced the event
+  payload: Record<string, unknown>;  // arbitrary event data
+  timestamp: number;   // unix milliseconds
+}
+```
+
+`type` is the field agents subscribe on. `payload` can carry any JSON-serializable data — build logs, PR metadata, alert details, and so on.
+
+## Two ways to push an event
+
+### POST /events
+
+Send an HTTP POST directly to the supervisor's events endpoint:
+
+```bash
+curl -X POST http://localhost:3120/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "ci.build.failed",
+    "source": "github-actions",
+    "payload": {
+      "repo": "my-org/my-repo",
+      "branch": "main",
+      "run_id": 9876543210,
+      "error": "Test suite failed: 3 tests failed in packages/api"
+    },
+    "timestamp": 1714123456789
+  }'
+```
+
+### event.push RPC
+
+If you are already speaking JSON-RPC to the supervisor (e.g. from a script using the host SDK), use the `event.push` method instead:
+
+```bash
+curl -X POST http://localhost:3120/rpc \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "event.push",
+    "params": {
+      "type": "ci.build.failed",
+      "source": "github-actions",
+      "payload": { "branch": "main", "error": "3 tests failed" },
+      "timestamp": 1714123456789
+    }
+  }'
+```
+
+Both paths behave identically; `POST /events` is the simpler choice for shell scripts and CI steps.
+
+## How the supervisor routes events
+
+When an event arrives, the supervisor iterates over all registered agents and checks each agent's `events` field in the agent definition. For any agent whose `events` array contains the incoming event `type`, the supervisor enqueues a `followUp` message to that agent with the serialized event payload as the message body.
+
+<Note>
+Events trigger follow-up messages, not steer messages. The agent will process the event on its next run-loop iteration. If you need to interrupt an agent that is currently running, send a steer message with `wanman send <agent> --steer` after pushing the event.
+</Note>
+
+## Subscribing an agent to event types
+
+Add an `events` array to the agent's definition in `agents.json`:
+
+```json
+{
+  "agents": [
+    {
+      "name": "ci-watcher",
+      "lifecycle": "on-demand",
+      "model": "standard",
+      "systemPrompt": "You watch CI build results and report failures to the CEO.",
+      "events": ["ci.build.failed", "ci.build.succeeded"]
+    },
+    {
+      "name": "ceo",
+      "lifecycle": "24/7",
+      "model": "high",
+      "systemPrompt": "..."
+    }
+  ]
+}
+```
+
+With this config, any event with `type: "ci.build.failed"` or `type: "ci.build.succeeded"` will wake up the `ci-watcher` agent. Agents without an `events` field receive no external events.
+
+## Example: CI build failure notification
+
+A typical GitHub Actions step that fires on failure:
+
+```yaml
+- name: Notify wanman on failure
+  if: failure()
+  run: |
+    curl -X POST http://localhost:3120/events \
+      -H "Content-Type: application/json" \
+      -d "{
+        \"type\": \"ci.build.failed\",
+        \"source\": \"github-actions\",
+        \"payload\": {
+          \"repo\": \"${{ github.repository }}\",
+          \"branch\": \"${{ github.ref_name }}\",
+          \"run_url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+        },
+        \"timestamp\": $(date +%s000)
+      }"
+```
+
+<Tip>
+If your CI runner cannot reach the supervisor directly (e.g. the supervisor is running on a developer's laptop), consider using a webhook relay service or the wanman.ai hosted edition, which exposes the events endpoint externally.
+</Tip>
+
+## External events vs. agent-to-agent messages
+
+| | External events | Agent-to-agent messages |
+|---|---|---|
+| **Origin** | Systems outside the matrix (CI, webhooks, scripts) | Agents inside the matrix |
+| **Entry point** | `POST /events` or `event.push` RPC | `wanman send` or `agent.send` RPC |
+| **Routing** | Supervisor fans out to subscribed agents | Point-to-point: one sender, one recipient |
+| **Priority** | Always `followUp` | `followUp` or `steer` |
+
+## Cron vs. event triggers
+
+Both cron and external events can wake `on-demand` agents, but they suit different needs:
+
+| | Cron | External events |
+|---|---|---|
+| **Schedule** | Time-based (every N minutes, specific hours) | Condition-based (something happened) |
+| **Config** | `cron` field in `agents.json` (5-field cron expression) | `events` field in `agents.json` + external push |
+| **Use when** | Polling, periodic reports, scheduled digests | Reacting to real-world changes immediately |
+
+Use cron for "check the dashboard every morning at 9am". Use external events for "act the moment a build breaks or a PR is merged".

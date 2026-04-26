@@ -1,0 +1,116 @@
+---
+title: "Taking over a git repository with wanman"
+description: "Use wanman takeover to materialize an agent matrix against any existing git repo, stream its activity, and interact with it from a second terminal."
+keywords: ["wanman", "takeover", "agent matrix", "git", "worktree", "supervisor", "claude", "codex"]
+---
+
+`wanman takeover` is the primary way to point a full agent matrix at an existing codebase. It sets up an isolated environment inside the repo, starts a supervisor, spawns agents, and stays in the foreground streaming their activity — all without touching your real working tree.
+
+## What takeover does
+
+<Steps>
+  <Step title="Creates .wanman/ inside the target repo">
+    wanman writes all its local state — the SQLite database, worktree, per-agent home directories, and logs — into a single `.wanman/` directory at the repo root. Nothing outside that directory is written.
+  </Step>
+  <Step title="Materializes a clean worktree">
+    A fresh worktree is checked out from `HEAD` at `.wanman/worktree/`. Agents read and edit files here, never in your actual working tree. Any uncommitted changes in your checkout are invisible to agents.
+  </Step>
+  <Step title="Starts the supervisor">
+    A local Node.js supervisor process starts on an auto-selected port (default `127.0.0.1:3120`) and waits until the health check passes before proceeding.
+  </Step>
+  <Step title="Spawns agents">
+    Each agent defined for the takeover is spawned as a Claude Code (or Codex) subprocess. Every agent gets its own isolated `$HOME` under `.wanman/home/<agent>/` so shell profile writes and CLI state stay contained.
+  </Step>
+  <Step title="Streams activity to the foreground">
+    Takeover stays in the foreground and pipes supervisor events — agent messages, task updates, artifact writes — to your terminal. Press Ctrl+C to stop.
+  </Step>
+</Steps>
+
+## Running takeover
+
+From inside any git repository:
+
+```bash
+cd /path/to/your/repo
+wanman takeover .
+```
+
+Or pass the path explicitly from anywhere:
+
+```bash
+wanman takeover /path/to/your/repo
+```
+
+## The .wanman/ directory layout
+
+After takeover starts, the repo will contain:
+
+```
+.wanman/
+  worktree/       clean checkout from HEAD — what agents actually edit
+  home/           isolated $HOME for each agent subprocess
+    ceo/
+    dev/
+    devops/
+    ...
+  agents/         per-agent workspace dirs (output files, scratch)
+  wanman.db       SQLite store: messages, context, tasks, artifacts, ...
+  logs/           supervisor and agent logs
+```
+
+You can browse `logs/` to see raw stdout/stderr from each agent subprocess, or tail `wanman.db` with any SQLite viewer.
+
+## Choosing a runtime
+
+Use `--runtime` to select between Claude Code and Codex:
+
+```bash
+wanman takeover . --runtime claude   # default
+wanman takeover . --runtime codex
+```
+
+The default is `claude`. You can also set `WANMAN_RUNTIME` in your environment as a persistent override.
+
+## Interacting with a running matrix
+
+While takeover is running in one terminal, open a second terminal in the same directory and use the CLI to inspect and steer the matrix:
+
+```bash
+# List all registered agents and their current states
+wanman agents
+
+# Send a follow-up message to the CEO agent
+wanman send ceo "Build me a sample TODO API"
+
+# Interrupt whatever the CEO is doing right now
+wanman send ceo --steer "Stop — focus on the auth module, not the landing page"
+
+# Live-stream supervisor events (alternative to the takeover foreground)
+wanman watch
+
+# Read replies from the CEO and mark them delivered
+wanman recv --agent ceo
+```
+
+`send` without `--steer` queues the message as a follow-up; it will be delivered on the agent's next run-loop iteration. `--steer` kills the agent's current subprocess immediately so the message is processed first.
+
+## wanman run vs. wanman takeover
+
+| | `wanman run <goal>` | `wanman takeover <path>` |
+|---|---|---|
+| **Use case** | One-shot goal; matrix exits when done | Persistent matrix that you steer over time |
+| **Lifecycle** | Runs until the goal is declared complete | Runs until you press Ctrl+C |
+| **Setup** | Materializes a temporary project | Writes `.wanman/` into the target repo |
+
+Use `run` when you have a single bounded task ("write a migration script"). Use `takeover` when you want an ongoing agent workforce collaborating on a codebase.
+
+## Cleanup
+
+Everything wanman creates lives inside `.wanman/`. To fully reset:
+
+```bash
+# Stop takeover first (Ctrl+C), then:
+rm -rf .wanman
+```
+
+Your real working tree is untouched.

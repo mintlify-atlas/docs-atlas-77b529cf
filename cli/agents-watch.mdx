@@ -1,0 +1,134 @@
+---
+title: "wanman agents and watch: observe the matrix"
+description: "List, spawn, and destroy agents with wanman agents, or observe loop events in real time with wanman watch's filtering and history options."
+---
+
+Wanman provides two observability commands: `agents` for agent state management and `watch` for live and historical loop event inspection. Both connect to the supervisor at `WANMAN_URL` (default `http://localhost:3120`).
+
+## `wanman agents`
+
+### List agents
+
+Lists all registered agents and their current states:
+
+```bash
+wanman agents
+```
+
+Example output:
+
+```
+Agent Matrix:
+──────────────────────────────────────────────────
+  * ceo             running    24/7       high
+  - dev             idle       on-demand  standard
+  - devops          idle       on-demand  standard
+  - support         idle       idle_cached standard
+```
+
+State icons: `*` = running, `-` = idle, `x` = error/stopped.
+
+**Agent states:**
+
+| State | Meaning |
+|-------|---------|
+| `idle` | Waiting for a trigger (normal for `on-demand` and `idle_cached`) |
+| `running` | A Claude Code or Codex subprocess is currently executing |
+| `stopped` | Manually stopped or supervisor shutting down |
+| `error` | Recent crash; supervisor will retry |
+
+### Spawn a dynamic agent clone
+
+Spawn a copy of an existing agent template, optionally with a new name:
+
+```bash
+wanman agents spawn <template> [name]
+```
+
+```bash
+# Spawn a second feedback agent
+wanman agents spawn feedback feedback-2
+
+# Spawn with an auto-generated name
+wanman agents spawn dev
+```
+
+Output:
+
+```
+Spawned: feedback-2 (clone of feedback)
+```
+
+### Destroy a dynamic agent
+
+Destroy a previously spawned dynamic agent (only dynamic clones can be destroyed — static agents defined in `agents.json` cannot):
+
+```bash
+wanman agents destroy <name>
+```
+
+```bash
+wanman agents destroy feedback-2
+```
+
+Output:
+
+```
+Destroyed: feedback-2
+```
+
+## `wanman watch`
+
+Reads and displays loop events. By default it reads `./deliverables/loop-events.ndjson` from the current directory. Use `--history` to query db9 for past runs.
+
+```bash
+wanman watch [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--file <path>` | Path to the NDJSON loop-events file (default: `./deliverables/loop-events.ndjson`). |
+| `--agent <name>` | Filter events to a specific agent. |
+| `--type <event_type>` | Filter by event type (`loop.tick`, `loop.classified`, `agent.spawned`, `task.transition`, etc.). |
+| `--classification <c>` | Filter to a specific loop classification (`productive`, `idle`, `blocked`, `backlog_stuck`, `error`). |
+| `--tail <n>` | Show last N events (default: 20). |
+| `--history` | Query db9 for historical events instead of reading a local file. |
+| `--run <run_id>` | Filter history by run ID. |
+| `--db <name>` | db9 database name for history mode (default: `wanman-brain-local`). |
+
+### Examples
+
+```bash
+# Show last 20 events from the default file
+wanman watch
+
+# Show last 50 events for the ceo agent only
+wanman watch --agent ceo --tail 50
+
+# Show only productive loops
+wanman watch --classification productive
+
+# Read from a custom file
+wanman watch --file /path/to/run/loop-events.ndjson
+
+# Query db9 history for a specific run
+wanman watch --history --run <run-id> --db wanman-brain-local
+```
+
+### Event types
+
+| Type | Description |
+|------|-------------|
+| `loop.tick` | A loop iteration started |
+| `loop.classified` | Loop classified as productive/idle/blocked/etc. |
+| `agent.spawned` | An agent subprocess was started |
+| `task.transition` | A task changed status |
+| `task.blocked` | A task is waiting on dependencies |
+| `queue.backlog` | An agent has a message backlog |
+| `artifact.created` | An artifact was stored |
+
+After displaying events, `watch` prints a productivity summary: total loops, productive count and rate, idle, blocked, backlog_stuck, and error counts.
+
+<Tip>
+  Use `wanman watch --classification productive --tail 100` to get a quick sense of how much useful work the matrix accomplished in a session.
+</Tip>

@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Wanman",
+  "projectType": "cli-tool",
+  "projectName": "Wanman",
+  "projectDescription": "An open-source agent matrix framework that orchestrates autonomous networks of Claude Code or Codex agents through a JSON-RPC supervisor, letting users step back into an observer role.",
   "theme": "luma",
-  "colors": {
-    "primary": "#5fb540",
-    "light": "#262626",
-    "dark": "#e9eae2"
-  },
-  "favicon": "https://media.brand.dev/a9fcdebc-0dd8-4848-8023-2804ec50d74a.svg",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/chekusu/wanman"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/chekusu/wanman"
-    }
-  },
+  "primaryColor": "#5fb540",
+  "lightColor": "#262626",
+  "darkColor": "#e9eae2",
   "navigation": {
     "tabs": [
       {
@@ -94,5 +81,39 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Multi-agent orchestration via JSON-RPC supervisor",
+    "Claude Code and Codex CLI runtime support",
+    "Three agent lifecycle modes: 24/7, on-demand, idle_cached",
+    "Per-agent worktree and $HOME isolation",
+    "Async message bus with steer/follow-up priorities",
+    "Structured state: tasks, initiatives, artifacts, hypotheses, capsules",
+    "Shared skills system auto-discovered by agents",
+    "Cron scheduling and external event ingestion",
+    "Optional db9 brain adapter for cross-run memory",
+    "Standalone CLI binary with scriptable JSON-RPC interface"
+  ],
+  "publicApiSurface": [
+    "wanman takeover <path>",
+    "wanman run <goal>",
+    "wanman send <agent> <msg>",
+    "wanman recv [--agent <name>]",
+    "wanman agents",
+    "wanman watch",
+    "wanman task create|list|get|update|done",
+    "wanman artifact put|list|get",
+    "wanman initiative create|list|get|update",
+    "wanman capsule create|list|mine|get|update",
+    "wanman hypothesis create|list|update",
+    "wanman context get|set",
+    "wanman escalate <msg>",
+    "wanman skill:check [path]",
+    "createWanmanHostSdk()",
+    "createEnvBackedWanmanHostSdk()",
+    "WanmanHostSdk.run()",
+    "WanmanHostSdk.takeover()",
+    "WanmanHostSdk.prepareTakeover()",
+    "WanmanHostSdk.executePreparedTakeover()"
+  ]
 }

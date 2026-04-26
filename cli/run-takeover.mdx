@@ -1,0 +1,141 @@
+---
+title: "wanman run and takeover: start agent matrices"
+description: "Start a goal-driven agent matrix with wanman run, or take over an existing git repo with wanman takeover. Full flag reference for both commands."
+---
+
+Wanman provides two top-level commands for starting agent matrices: `run` for goal-driven sessions and `takeover` for persistent, repo-aware coordination. Both start a local supervisor, spawn agents, and stream activity to your terminal.
+
+## `wanman run`
+
+Starts an agent matrix against a single goal. The matrix runs for up to `--loops` CEO iterations (default 100), or indefinitely with `--infinite`.
+
+```
+wanman run <goal> [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--loops <n>` | Maximum CEO loops before exit (default: 100). |
+| `--infinite` | Run indefinitely; equivalent to `--loops Infinity`. |
+| `--error-limit <n>` | Maximum consecutive error loops before exit (default: 20). |
+| `--poll <seconds>` | Loop poll interval in seconds (default: 15). |
+| `--runtime <name>` | Agent runtime: `claude` (default) or `codex`. |
+| `--codex-model <name>` | Codex model override. |
+| `--codex-effort <level>` | Codex reasoning effort: `low`, `medium`, `high`, `xhigh`. Aliases: `fast`, `balanced`, `deep`, `max`. |
+| `--codex-speed <level>` | Alias for `--codex-effort`. |
+| `--project-dir <path>` | Working directory to run against (defaults to current directory). |
+| `--config <path>` | Path to `agents.json` config file. |
+| `--worker-url <url>` | Worker LLM API endpoint (hybrid mode). |
+| `--worker-model <model>` | Worker model name. |
+| `--worker-key <key>` | Worker API key (default: `lmstudio`). |
+| `--no-brain` | Disable the db9 brain adapter. |
+| `--keep` | Keep the supervisor alive after the run exits. |
+| `--output <path>` | Write deliverables to this directory (default: `./deliverables`). |
+
+### Project directory structure
+
+When `--project-dir` contains an `agents.json`, wanman uses it directly. Expected layout:
+
+```
+project-dir/
+  agents.json              Agent role definitions
+  agents/{name}/AGENT.md   Per-agent skill files
+  skills/{name}/SKILL.md   Shared skills (optional)
+  products.json            Product catalog (optional)
+```
+
+### Examples
+
+```bash
+# One-shot goal with default settings
+wanman run "Write a market analysis for the productivity app space"
+
+# Run indefinitely with Codex
+wanman run "Maintain the API docs" --infinite --runtime codex
+
+# Use a specific project directory
+wanman run "Add OAuth2 support" --project-dir ./my-project
+
+# Limit loops and set a custom output dir
+wanman run "Generate reports" --loops 50 --output ./reports
+
+# Hybrid mode with a local LM Studio worker
+wanman run "Refactor auth module" \
+  --worker-url http://localhost:1234/v1 \
+  --worker-model lmstudio-community/Meta-Llama-3-8B-Instruct
+```
+
+## `wanman takeover`
+
+Scans an existing git repository, auto-generates an agent matrix configuration, and runs it. The takeover runs in `--infinite` mode by default.
+
+```
+wanman takeover <path> [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--goal <text>` | Override the auto-inferred long-running mission. |
+| `--runtime <name>` | Agent runtime: `claude` (default) or `codex`. |
+| `--codex-model <name>` | Codex model override. |
+| `--codex-effort <level>` | Codex reasoning effort: `low`, `medium`, `high`, `xhigh`. |
+| `--codex-speed <level>` | Alias for `--codex-effort`. |
+| `--dry-run` | Scan and generate the takeover overlay without launching agents. |
+| `--infinite` | Run indefinitely (default for takeover). |
+| `--loops <n>` | Run a finite number of loops instead of infinite mode. |
+| `--poll <seconds>` | Poll interval in seconds. |
+| `--keep` | Keep the supervisor alive on exit. |
+| `--output <path>` | Deliverables directory. |
+| `--no-brain` | Disable the db9 brain adapter. |
+
+### What takeover does
+
+When you run `wanman takeover <path>`, the CLI:
+
+1. **Scans** the repo — detects languages, frameworks, CI/CD, tests, package managers, and README.
+2. **Generates** an agent config — infers a goal and selects appropriate agent roles.
+3. **Prints** a project summary and agent list.
+4. **Materializes** a local takeover overlay with the generated config.
+5. **Runs** the matrix in infinite mode (unless `--loops` is set).
+
+### Examples
+
+```bash
+# Take over the current directory with Claude (default)
+wanman takeover .
+
+# Take over with Codex
+wanman takeover . --runtime codex
+
+# Override the auto-inferred goal
+wanman takeover /path/to/repo --goal "Ship a public v1 API by end of quarter"
+
+# Dry run — see what would be generated without launching
+wanman takeover . --dry-run
+
+# Finite run — exit after 20 loops
+wanman takeover . --loops 20
+```
+
+## Run vs takeover
+
+| | `wanman run` | `wanman takeover` |
+|-|-------------|-------------------|
+| Config source | `agents.json` or auto | Auto-generated from repo scan |
+| Default mode | 100 loops | Infinite |
+| Worktree isolation | Per run | Yes (per-agent worktrees in `.wanman/`) |
+| Repo context | Optional | Full git repo auto-detected |
+| Best for | Bounded, goal-driven tasks | Long-running autonomous repo ownership |
+
+## `wanman skill:check`
+
+Validates that skill documents reference only real, existing CLI commands:
+
+```bash
+wanman skill:check                    # check all skills in default location
+wanman skill:check /path/to/skills   # check a specific directory
+```
+
+<Note>
+  `skill:check` compares `wanman` command references found in `SKILL.md` files against the current CLI's command list. It does not validate flag names — only command names.
+</Note>

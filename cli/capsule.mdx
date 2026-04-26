@@ -1,0 +1,154 @@
+---
+title: "wanman capsule: manage change proposals"
+description: "Manage PR-sized change capsules in the wanman matrix. Create, list, review, and update bounded change proposals with branch, paths, and acceptance criteria."
+---
+
+Change capsules are PR-sized proposed changes that agents create when they want to make a bounded, reviewable modification to the codebase. Each capsule declares its goal, owner, branch, base commit, the paths it is allowed to touch, and acceptance criteria — giving a reviewing agent clear scope for approval.
+
+## Capsule lifecycle
+
+```
+open → in_review → merged
+              └──→ abandoned
+```
+
+An agent creates a capsule (`open`), a reviewer agent inspects it (`in_review`), and it is either merged or abandoned.
+
+## `wanman capsule create`
+
+Creates a new open capsule. All flags marked required must be provided:
+
+```
+wanman capsule create
+  --goal <goal>
+  --owner <agent>
+  --branch <branch-name>
+  --base <base-commit-sha>
+  --paths <p1,p2,...>
+  --acceptance <criteria>
+  [--reviewer <agent>]
+  [--initiative <id>]
+  [--task <id>]
+  [--subsystem <label>]
+  [--scope-type <code|docs|tests|ops|mixed>]
+  [--blocked-by <id1,id2>]
+  [--supersedes <id>]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--goal` | Yes | What this capsule achieves. |
+| `--owner` | Yes | Agent that owns the capsule. |
+| `--branch` | Yes | Git branch containing the changes. |
+| `--base` | Yes | Base commit SHA the branch diverged from. |
+| `--paths` | Yes | Comma-separated file/directory paths the capsule is allowed to touch. |
+| `--acceptance` | Yes | Criteria the reviewer must verify before merging. |
+| `--reviewer` | No | Agent assigned to review. |
+| `--initiative` | No | Associate with an initiative ID. |
+| `--task` | No | Associate with a task ID. |
+| `--subsystem` | No | Subsystem label (e.g. `auth`, `billing`). |
+| `--scope-type` | No | One of `code`, `docs`, `tests`, `ops`, `mixed`. |
+| `--blocked-by` | No | Comma-separated capsule IDs that must merge first. |
+| `--supersedes` | No | ID of a capsule this one replaces. |
+
+### Example
+
+```bash
+wanman capsule create \
+  --goal "Add /users CRUD endpoint" \
+  --owner dev \
+  --branch feat/users-endpoint \
+  --base a1b2c3d4 \
+  --paths "src/routes/users.ts,src/models/user.ts" \
+  --acceptance "All /users tests pass; no regressions in CI" \
+  --reviewer ceo \
+  --initiative abc12345
+```
+
+Output:
+
+```
+Capsule a1b2c3d4 created on feat/users-endpoint [open]
+```
+
+If other open capsules overlap the declared paths, the output also lists weak conflicts.
+
+## `wanman capsule list`
+
+Lists all capsules, optionally filtered:
+
+```
+wanman capsule list
+  [--status <open|in_review|merged|abandoned>]
+  [--owner <agent>]
+  [--initiative <id>]
+  [--reviewer <agent>]
+```
+
+```bash
+wanman capsule list
+wanman capsule list --status open
+wanman capsule list --owner dev
+wanman capsule list --reviewer ceo
+```
+
+## `wanman capsule mine`
+
+Lists capsules owned by the current agent (`WANMAN_AGENT_NAME`), or a specified agent:
+
+```
+wanman capsule mine [--agent <name>] [--status <status>]
+```
+
+```bash
+wanman capsule mine
+wanman capsule mine --agent dev
+wanman capsule mine --status open
+```
+
+Output includes the acceptance criteria for each capsule.
+
+## `wanman capsule get`
+
+Fetches full details for a single capsule as JSON:
+
+```bash
+wanman capsule get <capsule-id>
+```
+
+## `wanman capsule update`
+
+Updates one or more fields on an existing capsule:
+
+```
+wanman capsule update <id>
+  [--status <status>]
+  [--goal <text>]
+  [--owner <agent>]
+  [--branch <name>]
+  [--base <sha>]
+  [--paths <p1,p2>]
+  [--acceptance <text>]
+  [--reviewer <agent>]
+  [--initiative <id>]
+  [--task <id>]
+  [--subsystem <label>]
+  [--scope-type <code|docs|tests|ops|mixed>]
+  [--blocked-by <id1,id2>]
+  [--supersedes <id>]
+```
+
+```bash
+wanman capsule update a1b2c3d4 --status in_review
+wanman capsule update a1b2c3d4 --status merged
+wanman capsule update a1b2c3d4 --reviewer devops
+```
+
+## Status values
+
+| Status | Meaning |
+|--------|---------|
+| `open` | Proposed, awaiting review |
+| `in_review` | Reviewer agent is inspecting |
+| `merged` | Accepted and applied |
+| `abandoned` | Rejected or superseded |

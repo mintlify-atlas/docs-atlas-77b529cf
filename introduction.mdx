@@ -1,0 +1,72 @@
+---
+title: "Wanman: autonomous multi-agent matrix framework"
+description: "Wanman orchestrates networks of Claude Code or Codex agents on your machine, coordinated through a JSON-RPC supervisor while you observe from the sidelines."
+---
+
+Wanman is an open-source agent matrix framework that runs a supervised network of AI agents on your local machine. Inspired by the Japanese *ワンマン電車* (one-man train) — operated by a single driver without a conductor — wanman lets you step back into an observer role while Claude Code or Codex agents autonomously collaborate on your codebase.
+
+Each agent gets its own isolated worktree and `$HOME`, communicates through an async message bus, and is coordinated by a local JSON-RPC supervisor process. You interact through the `wanman` CLI: send goals, watch agents work, inspect artifacts, and steer the matrix when needed.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first agent matrix in minutes against any git repository.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Clone, build, and link the CLI from source.
+  </Card>
+  <Card title="Core Concepts" icon="brain" href="/concepts/agent-matrix">
+    Understand the agent matrix, lifecycles, and messaging system.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Every command, subcommand, and flag documented with examples.
+  </Card>
+</CardGroup>
+
+## What wanman does
+
+Wanman coordinates multiple specialized agents — CEO, dev, devops, marketing, feedback, and more — through a shared message bus. Each agent runs as a real Claude Code or Codex subprocess, operating inside an isolated environment so agents never touch your actual working tree.
+
+<CardGroup cols={2}>
+  <Card title="Agent Lifecycles" icon="rotate" href="/concepts/agent-lifecycles">
+    Learn about 24/7, on-demand, and idle_cached lifecycle modes.
+  </Card>
+  <Card title="Messaging System" icon="envelope" href="/concepts/messaging">
+    Steer and follow-up priorities, delivery guarantees, and message routing.
+  </Card>
+  <Card title="Structured Stores" icon="database" href="/concepts/stores">
+    Tasks, initiatives, artifacts, hypotheses, and change capsules.
+  </Card>
+  <Card title="Shared Skills" icon="graduation-cap" href="/guides/skills">
+    Ship skill documents that agents auto-discover and apply.
+  </Card>
+</CardGroup>
+
+## Key capabilities
+
+- **Multi-agent coordination** — CEO, dev, devops, and other agents collaborate through an async message bus with interrupt (`steer`) and queue (`follow-up`) priorities.
+- **Bring your own CLI auth** — wanman spawns Claude Code or Codex subprocesses and uses whatever auth they already have. No separate API key setup required.
+- **Full isolation** — every agent gets its own git worktree and `$HOME`, so agents never mutate your dirty checkout or shell profile.
+- **CLI-first** — everything is scriptable, observable, and reproducible through `wanman` commands and a JSON-RPC supervisor.
+- **Extensible** — attach a db9 brain adapter for cross-run memory, push external events via HTTP, or embed wanman in your own tools using the Host SDK.
+
+## How it works
+
+```
++----------------+          +--------------------+          +-----------------+
+|  wanman CLI    |  JSON    |  Supervisor        |  spawn   |  Agent process  |
+|  (host shell)  | ---RPC-->|  (local process)   | -------> |  (Claude/Codex) |
+|                |  /rpc    |  message/context/  |          |  per-agent $HOME|
+|                |          |  task/artifact     |          |  per-agent wt   |
++----------------+          +--------------------+          +-----------------+
+```
+
+The `wanman` CLI is a thin JSON-RPC 2.0 client. All orchestration — process management, persistence, routing — lives in the supervisor. Each agent child is a local Claude Code or Codex subprocess bound to a per-agent worktree and isolated `$HOME`.
+
+<CardGroup cols={2}>
+  <Card title="Architecture overview" icon="sitemap" href="/architecture/overview">
+    Deep dive into how the supervisor, agents, and stores fit together.
+  </Card>
+  <Card title="Host SDK" icon="code" href="/sdk/overview">
+    Embed wanman programmatically in your own Node.js tools.
+  </Card>
+</CardGroup>

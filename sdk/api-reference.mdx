@@ -1,0 +1,492 @@
+---
+title: "Host SDK API reference"
+description: "Complete API reference for the Wanman Host SDK: createWanmanHostSdk, WanmanHostSdk methods, WanmanHostSdkConfig, RunOptions, and ProjectRunSpec types."
+keywords: ["wanman", "host-sdk", "api", "reference", "types", "RunOptions", "ProjectRunSpec"]
+---
+
+This page documents every export from `@wanman/host-sdk`. All type signatures are taken directly from the source.
+
+---
+
+## createWanmanHostSdk
+
+Factory function that creates a `WanmanHostSdk` instance. You supply a config object and an adapters implementation; the SDK handles merging environment variables and normalising run options.
+
+```typescript
+function createWanmanHostSdk<
+  TProjectRunSpec = unknown,
+  TPreparedTakeoverPlan = unknown,
+  TConcreteTakeoverOptions extends object = WanmanHostTakeoverOptions,
+>(
+  config: WanmanHostSdkConfig,
+  adapters: WanmanHostSdkAdapters<TProjectRunSpec, TPreparedTakeoverPlan, TConcreteTakeoverOptions>,
+): WanmanHostSdk<TProjectRunSpec, TPreparedTakeoverPlan, TConcreteTakeoverOptions | WanmanHostTakeoverOptions>
+```
+
+### Parameters
+
+<ParamField path="config" type="WanmanHostSdkConfig" default="{}">
+  Optional SDK configuration. When omitted, the host environment is read from `process.env`.
+
+  <Expandable title="WanmanHostSdkConfig properties">
+    <ParamField path="config.env" type="NodeJS.ProcessEnv">
+      Additional environment variables to merge on top of `process.env`. Values here take precedence over the host process environment.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="adapters" type="WanmanHostSdkAdapters" required>
+  The adapter implementation that connects the SDK to a concrete execution backend. See [WanmanHostSdkAdapters](#wanmanhostsdkadapters) below.
+</ParamField>
+
+### Returns
+
+<ResponseField name="WanmanHostSdk" type="object">
+  An object implementing the `WanmanHostSdk` interface. See [WanmanHostSdk interface](#wanmanhostsdk-interface).
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```typescript TypeScript
+import { createWanmanHostSdk, type WanmanHostSdkAdapters } from '@wanman/host-sdk'
+
+const sdk = createWanmanHostSdk(
+  { env: { WANMAN_EXTRA: 'value' } },
+  adapters,
+)
+```
+
+```javascript JavaScript
+import { createWanmanHostSdk } from '@wanman/host-sdk'
+
+const sdk = createWanmanHostSdk(
+  { env: { WANMAN_EXTRA: 'value' } },
+  adapters,
+)
+```
+
+</CodeGroup>
+
+---
+
+## createEnvBackedWanmanHostSdk
+
+Environment-backed variant of `createWanmanHostSdk`. The first argument is an explicit `env` object (rather than embedding it inside a config), making it easy to forward a specific environment snapshot to the SDK.
+
+```typescript
+function createEnvBackedWanmanHostSdk<
+  TProjectRunSpec = unknown,
+  TPreparedTakeoverPlan = unknown,
+  TConcreteTakeoverOptions extends object = WanmanHostTakeoverOptions,
+>(
+  env: NodeJS.ProcessEnv,
+  config: Omit<WanmanHostSdkConfig, 'env'>,
+  adapters: WanmanHostSdkAdapters<TProjectRunSpec, TPreparedTakeoverPlan, TConcreteTakeoverOptions>,
+): WanmanHostSdk<TProjectRunSpec, TPreparedTakeoverPlan, TConcreteTakeoverOptions | WanmanHostTakeoverOptions>
+```
+
+### Parameters
+
+<ParamField path="env" type="NodeJS.ProcessEnv" default="process.env">
+  The environment variables to pass to the SDK. Defaults to `process.env`.
+</ParamField>
+
+<ParamField path="config" type="Omit<WanmanHostSdkConfig, 'env'>" default="{}">
+  Additional config. The `env` key is excluded here since it is provided as the first argument.
+</ParamField>
+
+<ParamField path="adapters" type="WanmanHostSdkAdapters" required>
+  The adapter implementation.
+</ParamField>
+
+### Returns
+
+<ResponseField name="WanmanHostSdk" type="object">
+  An object implementing the `WanmanHostSdk` interface.
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```typescript TypeScript
+import { createEnvBackedWanmanHostSdk } from '@wanman/host-sdk'
+
+const sdk = createEnvBackedWanmanHostSdk(
+  process.env,
+  {},
+  adapters,
+)
+```
+
+```javascript JavaScript
+import { createEnvBackedWanmanHostSdk } from '@wanman/host-sdk'
+
+const sdk = createEnvBackedWanmanHostSdk(
+  process.env,
+  {},
+  adapters,
+)
+```
+
+</CodeGroup>
+
+---
+
+## WanmanHostSdk interface
+
+The core SDK interface returned by both factory functions. All four methods are available on every instance.
+
+```typescript
+interface WanmanHostSdk<
+  TProjectRunSpec = unknown,
+  TPreparedTakeoverPlan = unknown,
+  TTakeoverInvocation = WanmanHostTakeoverOptions,
+> {
+  run(goal: string, options?: WanmanHostRunInvocation, spec?: TProjectRunSpec): Promise<void>
+  prepareTakeover(options: TTakeoverInvocation): TPreparedTakeoverPlan
+  executePreparedTakeover(plan: TPreparedTakeoverPlan, options?: WanmanHostRunInvocation): Promise<void>
+  takeover(options: TTakeoverInvocation, runOptions?: WanmanHostRunInvocation): Promise<void>
+}
+```
+
+### run
+
+Runs a goal string through the agent matrix. Merges any provided options with the default `RunOptions` before dispatching to `adapters.runGoal`.
+
+```typescript
+run(goal: string, options?: WanmanHostRunInvocation, spec?: TProjectRunSpec): Promise<void>
+```
+
+<ParamField path="goal" type="string" required>
+  The goal string to execute.
+</ParamField>
+
+<ParamField path="options" type="WanmanHostRunInvocation">
+  Optional run-time overrides. Accepts any subset of `RunOptions`. Missing fields are filled from `createRunOptions` defaults.
+</ParamField>
+
+<ParamField path="spec" type="TProjectRunSpec">
+  Optional project run spec. Defaults to an empty object if omitted.
+</ParamField>
+
+---
+
+### takeover
+
+Convenience method that calls `prepareTakeover` and then `executePreparedTakeover` in sequence. Use this when you don't need to inspect the plan between the two phases.
+
+```typescript
+takeover(options: TTakeoverInvocation, runOptions?: WanmanHostRunInvocation): Promise<void>
+```
+
+<ParamField path="options" type="TTakeoverInvocation" required>
+  Takeover options. Typically a `WanmanHostTakeoverOptions` object.
+</ParamField>
+
+<ParamField path="runOptions" type="WanmanHostRunInvocation">
+  Optional overrides for the run phase. Merged with `createTakeoverRunOptions` defaults (i.e., `infinite: true`, `loops: Infinity`).
+</ParamField>
+
+---
+
+### prepareTakeover
+
+Synchronously builds a prepared takeover plan from the supplied options. The plan is opaque (`TPreparedTakeoverPlan`) and is produced by `adapters.prepareTakeoverPlan`.
+
+```typescript
+prepareTakeover(options: TTakeoverInvocation): TPreparedTakeoverPlan
+```
+
+<ParamField path="options" type="TTakeoverInvocation" required>
+  The raw takeover options. Normalised through `adapters.normalizeTakeoverOptions` before being passed to `adapters.prepareTakeoverPlan`.
+</ParamField>
+
+<ResponseField name="TPreparedTakeoverPlan" type="generic">
+  A plan object whose shape is determined by your adapter implementation.
+</ResponseField>
+
+---
+
+### executePreparedTakeover
+
+Executes a plan produced by `prepareTakeover`. Merges run options with `createTakeoverRunOptions` defaults before dispatching to `adapters.executePreparedTakeoverPlan`.
+
+```typescript
+executePreparedTakeover(plan: TPreparedTakeoverPlan, options?: WanmanHostRunInvocation): Promise<void>
+```
+
+<ParamField path="plan" type="TPreparedTakeoverPlan" required>
+  The prepared plan returned by `prepareTakeover`.
+</ParamField>
+
+<ParamField path="options" type="WanmanHostRunInvocation">
+  Optional run-time overrides. Merged with `createTakeoverRunOptions` defaults.
+</ParamField>
+
+---
+
+## WanmanHostTakeoverOptions
+
+Options object passed to `takeover` and `prepareTakeover`.
+
+```typescript
+interface WanmanHostTakeoverOptions {
+  projectPath: string
+  goalOverride?: string
+  runtime?: AgentRuntime
+  githubToken?: string
+  enableBrain?: boolean
+}
+```
+
+<ParamField path="projectPath" type="string" required>
+  Absolute path to the project directory the agent should operate on.
+</ParamField>
+
+<ParamField path="goalOverride" type="string">
+  If provided, replaces the project's default goal with this string for the current run.
+</ParamField>
+
+<ParamField path="runtime" type="AgentRuntime">
+  The agent runtime to use. When omitted, the runtime is resolved from `RunOptions` or the adapter default.
+</ParamField>
+
+<ParamField path="githubToken" type="string">
+  A GitHub personal access token. Used by adapters that need to authenticate against GitHub during the takeover.
+</ParamField>
+
+<ParamField path="enableBrain" type="boolean">
+  When `true`, enables the brain subsystem for this takeover. Overrides `noBrain` in `RunOptions` when set.
+</ParamField>
+
+---
+
+## RunOptions
+
+Full set of runtime knobs controlling agent loop behaviour. Produced by `createRunOptions` and `createTakeoverRunOptions`. All fields except `loops`, `pollInterval`, `noBrain`, `keep`, `output`, `infinite`, and `errorLimit` are optional.
+
+```typescript
+interface RunOptions {
+  loops: number
+  pollInterval: number
+  runtime?: AgentRuntime
+  codexModel?: string
+  codexReasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh'
+  configPath?: string
+  projectDir?: string
+  workerUrl?: string
+  workerModel?: string
+  workerKey?: string
+  noBrain: boolean
+  keep: boolean
+  output: string
+  infinite: boolean
+  errorLimit: number
+}
+```
+
+<ParamField path="loops" type="number" default="100">
+  Maximum number of agent loop iterations. Set to `Infinity` when `infinite` is `true`.
+</ParamField>
+
+<ParamField path="pollInterval" type="number" default="15">
+  Polling interval in seconds between loop ticks.
+</ParamField>
+
+<ParamField path="runtime" type="AgentRuntime">
+  Agent runtime identifier. When omitted, the adapter determines the default.
+</ParamField>
+
+<ParamField path="codexModel" type="string">
+  Codex model name to use for code generation steps.
+</ParamField>
+
+<ParamField path="codexReasoningEffort" type="'low' | 'medium' | 'high' | 'xhigh'">
+  Controls the reasoning effort of the Codex model.
+</ParamField>
+
+<ParamField path="configPath" type="string">
+  Path to a wanman config file. Overrides auto-discovery.
+</ParamField>
+
+<ParamField path="projectDir" type="string">
+  Working directory for the agent run. Overrides the project root resolved by the adapter.
+</ParamField>
+
+<ParamField path="workerUrl" type="string">
+  URL of a custom worker endpoint.
+</ParamField>
+
+<ParamField path="workerModel" type="string">
+  Model identifier to request from the worker.
+</ParamField>
+
+<ParamField path="workerKey" type="string" default="lmstudio">
+  API key or identifier for the worker service.
+</ParamField>
+
+<ParamField path="noBrain" type="boolean" default="false">
+  When `true`, disables the brain subsystem.
+</ParamField>
+
+<ParamField path="keep" type="boolean" default="false">
+  When `true`, preserves intermediate artefacts after the run completes.
+</ParamField>
+
+<ParamField path="output" type="string" default="./deliverables">
+  Directory where the agent writes output files.
+</ParamField>
+
+<ParamField path="infinite" type="boolean" default="false">
+  When `true`, sets `loops` to `Infinity` and the run continues until externally stopped.
+</ParamField>
+
+<ParamField path="errorLimit" type="number" default="20">
+  Maximum number of consecutive errors before the agent aborts the run.
+</ParamField>
+
+### Helper functions
+
+Three functions are exported for constructing `RunOptions` objects:
+
+| Function | Description |
+|---|---|
+| `createDefaultRunOptions()` | Returns the baseline defaults shown above. |
+| `createRunOptions(overrides?)` | Merges `overrides` with the defaults. If `infinite` is `true`, forces `loops` to `Infinity`. |
+| `createTakeoverRunOptions(overrides?)` | Calls `createRunOptions` with `infinite: true` and `loops: Infinity` pre-set, suitable for long-running takeovers. |
+
+---
+
+## ProjectRunSpec
+
+Per-run project descriptor passed as the `spec` argument to `sdk.run()`. All fields are optional.
+
+```typescript
+interface ProjectRunSpec<THooks = unknown> {
+  projectDir?: string
+  repoSourceDir?: string
+  repoCloneUrl?: string
+  workspaceRoot?: string
+  gitRoot?: string
+  sourceLabel?: string
+  bootstrapScript?: string
+  githubToken?: string
+  threadSync?: ThreadSyncSpec
+  hooks?: THooks
+}
+```
+
+<ParamField path="projectDir" type="string">
+  Absolute path to the project directory. Takes precedence over `RunOptions.projectDir` when provided.
+</ParamField>
+
+<ParamField path="repoSourceDir" type="string">
+  Path to the repository source within a larger monorepo or workspace.
+</ParamField>
+
+<ParamField path="repoCloneUrl" type="string">
+  Git clone URL used when the adapter needs to check out the repository before running.
+</ParamField>
+
+<ParamField path="workspaceRoot" type="string">
+  Absolute path to the root of the workspace containing the project.
+</ParamField>
+
+<ParamField path="gitRoot" type="string">
+  Absolute path to the Git repository root. Useful when it differs from `projectDir`.
+</ParamField>
+
+<ParamField path="sourceLabel" type="string">
+  Human-readable label identifying the source of this run (e.g. a branch name or PR identifier).
+</ParamField>
+
+<ParamField path="bootstrapScript" type="string">
+  Shell script or command to run once before the agent loop starts.
+</ParamField>
+
+<ParamField path="githubToken" type="string">
+  GitHub token scoped to this specific run. Takes precedence over the token in `WanmanHostTakeoverOptions`.
+</ParamField>
+
+<ParamField path="threadSync" type="ThreadSyncSpec">
+  Configuration for syncing agent messages to an external thread.
+
+  <Expandable title="ThreadSyncSpec properties">
+    <ParamField path="threadSync.threadId" type="string" required>
+      Identifier of the thread to synchronise with.
+    </ParamField>
+    <ParamField path="threadSync.syncUrl" type="string">
+      Endpoint URL to POST thread sync events to.
+    </ParamField>
+    <ParamField path="threadSync.syncSecret" type="string">
+      Shared secret used to authenticate thread sync requests.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="hooks" type="THooks">
+  Adapter-specific lifecycle hooks. The shape is determined by the adapter's generic parameter.
+</ParamField>
+
+---
+
+## WanmanHostSdkAdapters
+
+The adapter interface you implement to connect the SDK to a concrete execution backend. Passed as the second argument to both factory functions.
+
+```typescript
+interface WanmanHostSdkAdapters<
+  TProjectRunSpec,
+  TPreparedTakeoverPlan,
+  TConcreteTakeoverOptions extends object,
+> {
+  runGoal(
+    goal: string,
+    options: RunOptions,
+    spec: TProjectRunSpec,
+    bindings: WanmanHostSdkBindings,
+  ): Promise<void>
+  prepareTakeoverPlan(options: TConcreteTakeoverOptions): TPreparedTakeoverPlan
+  executePreparedTakeoverPlan(
+    plan: TPreparedTakeoverPlan,
+    options: RunOptions,
+    bindings: WanmanHostSdkBindings,
+  ): Promise<void>
+  normalizeTakeoverOptions(
+    options: TConcreteTakeoverOptions | WanmanHostTakeoverOptions,
+  ): TConcreteTakeoverOptions
+}
+```
+
+<ParamField path="runGoal" type="function" required>
+  Called by `sdk.run()`. Receives the fully resolved `RunOptions` (with defaults applied) and a `WanmanHostSdkBindings` object containing the merged host environment.
+</ParamField>
+
+<ParamField path="prepareTakeoverPlan" type="function" required>
+  Called by `sdk.prepareTakeover()`. Receives the normalised concrete takeover options and should return the opaque plan object.
+</ParamField>
+
+<ParamField path="executePreparedTakeoverPlan" type="function" required>
+  Called by `sdk.executePreparedTakeover()`. Receives the plan, the fully resolved `RunOptions`, and the host bindings.
+</ParamField>
+
+<ParamField path="normalizeTakeoverOptions" type="function" required>
+  Coerces a `WanmanHostTakeoverOptions | TConcreteTakeoverOptions` union into `TConcreteTakeoverOptions`. Lets the adapter upgrade base-type options into its own richer options shape.
+</ParamField>
+
+### WanmanHostSdkBindings
+
+Passed to `runGoal` and `executePreparedTakeoverPlan`.
+
+```typescript
+interface WanmanHostSdkBindings {
+  hostEnv: NodeJS.ProcessEnv
+}
+```
+
+<ResponseField name="hostEnv" type="NodeJS.ProcessEnv">
+  The merged host environment: `process.env` overlaid with any values from `WanmanHostSdkConfig.env`.
+</ResponseField>

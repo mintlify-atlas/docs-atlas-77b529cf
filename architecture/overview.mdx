@@ -1,0 +1,82 @@
+---
+title: "Wanman architecture overview"
+description: "How wanman's CLI, supervisor, agent processes, and SQLite stores fit together. A tour of the system for developers new to the codebase."
+---
+
+Wanman consists of three main layers: a thin CLI client, a local supervisor process, and one agent subprocess per registered agent. All coordination, persistence, and process management lives in the supervisor — the CLI only needs `WANMAN_URL` to reach it.
+
+## System overview
+
+```
++----------------+              +--------------------------------+
+|  wanman CLI    |              |  Supervisor process (local)    |
+|  (host shell)  |  JSON-RPC    |                                |
+|                | -----------> |  MessageStore  ContextStore    |
+|  send/recv/    |  HTTP :3120  |  TaskPool      ArtifactStore   |
+|  task/agents/  |              |  InitiativeBoard               |
+|  artifact/...  |              |  CronScheduler                 |
++----------------+              |  Relay         LoopEventBus    |
+                                |                                |
+                                |  +--------------------------+  |
+                                |  |  AgentProcess[]          |  |
+                                |  |  (spawns Claude/Codex    |  |
+                                |  |   CLI children)          |  |
+                                |  +--------------------------+  |
+                                +----------------+---------------+
+                                                 |
+                                                 v
+                                    Claude Code / Codex subprocess
+                                    (per-agent worktree + $HOME)
+```
+
+## Package structure
+
+| Package | Role |
+|---------|------|
+| `@wanman/cli` | CLI commands (send, recv, task, artifact, run, takeover, watch). Speaks JSON-RPC to the supervisor. No business logic. |
+| `@wanman/core` | Shared types, JSON-RPC protocol definitions, and the `SKILL.md` bundle. |
+| `@wanman/runtime` | The supervisor: agent process manager, SQLite stores, Claude/Codex adapters, cron scheduler, event router. |
+| `@wanman/host-sdk` | Programmatic embedding SDK for host-side integrations. |
+
+## The supervisor
+
+The supervisor is a plain local Node.js process. It owns:
+
+- **MessageStore** — persists and routes agent-to-agent messages with priority ordering.
+- **ContextStore** — shared key-value store for cross-agent state.
+- **TaskPool** — structured tasks with statuses and `--after` dependency chains.
+- **ArtifactStore** — agent-produced structured outputs.
+- **InitiativeBoard** — long-lived multi-task initiatives.
+- **HypothesisPool** — experiment hypotheses with status transitions.
+- **ChangeCapsulePool** — proposed PR-sized change bundles.
+- **CronScheduler** — runs every 60 seconds, fires agents on matching expressions.
+- **Relay** — routes messages to agents, handles steer callbacks (SIGKILL current child).
+- **LoopEventBus** — broadcasts loop events for `wanman watch` consumers.
+
+All state lives in a single SQLite file (`wanman.db`). No external database is required.
+
+## Agent processes
+
+Each agent is a Claude Code or Codex CLI subprocess. The supervisor:
+
+1. Sets up a per-agent worktree (clean `HEAD` snapshot) and per-agent `$HOME`.
+2. Spawns the subprocess with the agent's system prompt and any pending messages as the initial prompt.
+3. Streams `AgentRunEvent` objects from the child process back to the supervisor.
+4. On exit: sleeps briefly (for `24/7` agents) then respawns, or returns to `idle` (for `on-demand`/`idle_cached`).
+
+## HTTP surface
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/health` | GET | Supervisor and per-agent state snapshot |
+| `/rpc` | POST | JSON-RPC 2.0 — the main CLI surface |
+| `/events` | POST | External event ingress |
+
+<CardGroup cols={2}>
+  <Card title="Supervisor internals" icon="server" href="/architecture/supervisor">
+    Deep dive into the supervisor, stores, and agent lifecycle management.
+  </Card>
+  <Card title="RPC protocol" icon="plug" href="/architecture/rpc-protocol">
+    Full JSON-RPC method reference for the supervisor API.
+  </Card>
+</CardGroup>

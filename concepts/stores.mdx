@@ -1,0 +1,145 @@
+---
+title: "Structured stores: tasks, artifacts, and more"
+description: "Wanman's supervisor manages five SQLite stores — tasks, initiatives, artifacts, hypotheses, and capsules — all accessible via CLI commands and JSON-RPC."
+---
+
+Beyond the message bus, wanman's supervisor maintains five structured stores in a single SQLite database (`wanman.db`). These stores let agents coordinate around shared work items, publish outputs, track experiments, and propose changes — all persisted durably across supervisor restarts.
+
+## Task pool
+
+The task pool (`TaskPool`) tracks discrete units of work with statuses and dependency chains. Agents create tasks, update their status, and declare dependencies using `--after`.
+
+```typescript
+// Status transitions
+type TaskStatus = 'pending' | 'in_progress' | 'done' | 'blocked'
+```
+
+Common CLI operations:
+
+```bash
+wanman task create "Implement the /users endpoint" --scope code
+wanman task list                           # all tasks, dependency-aware view
+wanman task get <task-id>                  # full details
+wanman task update <task-id> --status in_progress
+wanman task done <task-id>
+wanman task create "Write tests" --after <task-id>   # dependency
+```
+
+## Initiative board
+
+Initiatives (`InitiativeBoard`) track longer-lived, multi-task efforts — think epics or product goals. Agents use initiatives to group related tasks under a common objective.
+
+```typescript
+interface Initiative {
+  id: string
+  title: string
+  goal: string
+  summary: string
+  status: 'active' | 'paused' | 'completed' | 'abandoned'
+  priority: number
+  sources: string[]
+  createdBy: string
+  createdAt: number
+  updatedAt: number
+}
+```
+
+CLI operations:
+
+```bash
+wanman initiative create "Build v1 REST API" --goal "Ship a production-ready API"
+wanman initiative list
+wanman initiative get <initiative-id>
+wanman initiative update <initiative-id> --status completed
+```
+
+## Artifact store
+
+The artifact store (`ArtifactStore`) holds structured outputs produced by agents — research summaries, plans, financial models, generated code, test reports, etc.
+
+Agents publish artifacts with `wanman artifact put`. The store records the artifact's kind, path, content, and JSON metadata.
+
+CLI operations:
+
+```bash
+wanman artifact list                  # all artifacts, newest first
+wanman artifact list --agent ceo      # filter by producer
+wanman artifact get <artifact-id>     # full content + metadata
+```
+
+Conventions for artifact naming and quality are shipped as shared skills — see [Shared skills](/guides/skills).
+
+## Hypothesis pool
+
+The hypothesis pool (`HypothesisPool`) tracks experiment-style hypotheses with explicit status transitions. Useful for research-heavy workflows where agents form, test, and resolve hypotheses.
+
+```bash
+wanman hypothesis create "Users prefer feature A over B"
+wanman hypothesis list
+wanman hypothesis update <hypothesis-id> --status confirmed
+```
+
+## Change capsule pool
+
+Change capsules (`ChangeCapsulePool`) represent PR-sized proposed changes. Each capsule is linked to a branch, a base commit, and a set of allowed paths. Agents can propose changes, which the CEO (or a review agent) can approve or reject.
+
+```typescript
+interface ChangeCapsule {
+  id: string
+  goal: string
+  ownerAgent: string
+  branch: string
+  baseCommit: string
+  allowedPaths: string[]
+  acceptance: string
+  reviewer: string
+  status: 'open' | 'in_review' | 'merged' | 'abandoned'
+  initiativeId?: string
+  taskId?: string
+}
+```
+
+CLI operations:
+
+```bash
+wanman capsule create --goal "Add /users endpoint" --branch feat/users
+wanman capsule list
+wanman capsule mine                    # capsules owned by current agent
+wanman capsule get <capsule-id>
+wanman capsule update <capsule-id> --status merged
+```
+
+## Shared context store
+
+The context store is a simple key/value store for shared state across agents. Useful for system-wide state like "last build result", "current MRR", or "active sprint goal".
+
+```typescript
+interface ContextEntry {
+  key: string
+  value: string
+  updatedBy: string  // agent name
+  updatedAt: number  // unix ms
+}
+```
+
+`set` is an upsert operation — it creates or replaces the value atomically.
+
+```bash
+wanman context set last_build_result "success"
+wanman context get last_build_result
+wanman context list                    # all context entries
+```
+
+From inside an agent subprocess:
+
+```bash
+wanman context set sprint_goal "Ship user auth by Friday"
+```
+
+## All stores in one database
+
+Every store is a table in a single `wanman.db` SQLite file at the path specified by `dbPath` in your `agents.json`. The file is created automatically on first run and survives supervisor restarts — no database server required.
+
+<Note>
+  All stores are accessible via the JSON-RPC interface at `/rpc`, not just through the CLI. See [RPC protocol](/architecture/rpc-protocol) for the full method list.
+</Note>

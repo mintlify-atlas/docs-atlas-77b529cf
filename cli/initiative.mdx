@@ -1,0 +1,160 @@
+---
+title: "wanman initiative and hypothesis commands"
+description: "Track long-lived product initiatives and experiment hypotheses in the wanman matrix, with create, list, get, and update subcommands for each."
+---
+
+Wanman provides two commands for higher-level coordination: `initiative` for long-lived, multi-task product goals and `hypothesis` for experiment-style claims with explicit status transitions. Both store their state in SQLite and are accessible to all agents.
+
+## Initiative commands
+
+An initiative groups related tasks under a common objective — analogous to an epic. Agents create initiatives to coordinate multi-step efforts and track overall progress toward a product goal.
+
+### `wanman initiative create`
+
+```
+wanman initiative create <title>
+  --goal <goal>
+  [--summary <text>]
+  [--priority <1-10>]
+  [--source <s1,s2>]
+  [--status <active|paused|completed|abandoned>]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--goal` | Yes | The specific outcome the initiative aims to achieve. |
+| `--summary` | No | Free-text summary (shown in `list` output). |
+| `--priority` | No | Integer 1–10; defaults to 5. |
+| `--source` | No | Comma-separated source references (e.g. URLs, document paths). |
+| `--status` | No | Initial status (default: `active`). |
+
+```bash
+wanman initiative create "Build v1 REST API" \
+  --goal "Ship a production-ready API with auth by end of quarter" \
+  --priority 8 \
+  --summary "Covers /users, /auth, and /products endpoints"
+```
+
+Output:
+
+```
+Initiative a1b2c3d4 created: "Build v1 REST API" [active]
+```
+
+### `wanman initiative list`
+
+```
+wanman initiative list [--status <status>]
+```
+
+```bash
+wanman initiative list
+wanman initiative list --status active
+```
+
+Each line shows: `[status]` · short ID · `P<priority>` · title · summary excerpt.
+
+### `wanman initiative get`
+
+Fetches full details for a single initiative as JSON:
+
+```bash
+wanman initiative get <initiative-id>
+```
+
+### `wanman initiative update`
+
+```
+wanman initiative update <id>
+  [--title <text>]
+  [--goal <text>]
+  [--summary <text>]
+  [--priority <1-10>]
+  [--source <s1,s2>]
+  [--status <active|paused|completed|abandoned>]
+```
+
+```bash
+wanman initiative update a1b2c3d4 --status completed
+wanman initiative update a1b2c3d4 --priority 9 --summary "Updated scope"
+```
+
+**Status values:**
+
+| Status | Meaning |
+|--------|---------|
+| `active` | Currently in progress |
+| `paused` | Temporarily on hold |
+| `completed` | Goal achieved |
+| `abandoned` | No longer pursued |
+
+---
+
+## Hypothesis commands
+
+Hypotheses track experiment-style claims the CEO and other agents form during research or planning. They follow explicit status transitions from `proposed` through `validated` or `rejected`.
+
+### `wanman hypothesis create`
+
+```
+wanman hypothesis create "<title>"
+  [--rationale <text>]
+  [--expected-value <text>]
+  [--estimated-cost <text>]
+  [--parent <id>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--rationale` | Why this hypothesis is worth testing. |
+| `--expected-value` | What benefit validation would deliver. |
+| `--estimated-cost` | Rough cost estimate (free-form text, e.g. `"2-3 tasks"`). |
+| `--parent <id>` | Parent hypothesis ID — for branching a hypothesis tree. |
+
+```bash
+wanman hypothesis create "Users prefer location A over B" \
+  --rationale "Foot traffic data suggests higher conversion" \
+  --expected-value "Reduce rental risk" \
+  --estimated-cost "2-3 tasks"
+```
+
+Output:
+
+```
+Hypothesis #1 created: Users prefer location A over B
+```
+
+### `wanman hypothesis list`
+
+```
+wanman hypothesis list
+  [--status <proposed|active|validated|rejected|abandoned>]
+  [--tree <root-id>]
+```
+
+`--tree <id>` shows the full hypothesis tree rooted at the given ID.
+
+```bash
+wanman hypothesis list
+wanman hypothesis list --status active
+wanman hypothesis list --tree 1
+```
+
+### `wanman hypothesis update`
+
+```
+wanman hypothesis update <id>
+  --status <status>
+  [--outcome <text>]
+  [--evidence <artifact-id1,artifact-id2>]
+```
+
+```bash
+wanman hypothesis update 1 --status active
+wanman hypothesis update 1 --status validated \
+  --outcome "Location A confirmed by site visits" \
+  --evidence 42,43,44
+wanman hypothesis update 1 --status rejected --outcome "Data was inconclusive"
+```
+
+**Status values:** `proposed` · `active` · `validated` · `rejected` · `abandoned`

@@ -1,0 +1,150 @@
+---
+title: "Install Wanman from source"
+description: "Clone the Wanman repository, install dependencies, and set up the CLI for local development or production use with pnpm and Node.js 20+."
+---
+
+Wanman is not yet published to npm and must be installed from source. This page covers all available installation methods: running directly with pnpm, linking globally, or building a standalone binary bundle.
+
+## System requirements
+
+| Requirement | Minimum version |
+|-------------|-----------------|
+| Node.js | 20.0.0 |
+| pnpm | 9.0.0 |
+| git | any recent version |
+
+You also need an authenticated Claude Code CLI (`@anthropic-ai/claude-code`) or Codex CLI (`@openai/codex`) — wanman spawns these as agent subprocesses.
+
+## Clone and build
+
+```bash
+git clone git@github.com:chekusu/wanman.git wanman.dev
+cd wanman.dev
+pnpm install
+pnpm build
+```
+
+The monorepo contains four packages:
+
+| Package | Description |
+|---------|-------------|
+| `@wanman/cli` | The `wanman` CLI binary |
+| `@wanman/core` | Shared types, JSON-RPC protocol, and skills |
+| `@wanman/runtime` | Supervisor, agent process manager, SQLite stores |
+| `@wanman/host-sdk` | Host-side SDK for embedding wanman in other tools |
+
+## Choose an installation method
+
+<Tabs>
+  <Tab title="pnpm exec (no PATH setup)">
+    Use `pnpm --filter` to run the CLI directly from the monorepo — no PATH changes needed:
+
+    ```bash
+    pnpm --filter @wanman/cli exec wanman --help
+    pnpm --filter @wanman/cli exec wanman takeover /path/to/repo
+    ```
+
+    This is the recommended approach for local development.
+  </Tab>
+  <Tab title="npm link (global)">
+    Link the CLI globally so you can call `wanman` from anywhere:
+
+    ```bash
+    cd packages/cli
+    npm link
+    wanman --help
+    ```
+
+    To unlink later:
+
+    ```bash
+    npm unlink -g @wanman/cli
+    ```
+  </Tab>
+  <Tab title="Standalone bundle">
+    Build a single self-contained `.mjs` file — no `node_modules` required at runtime:
+
+    ```bash
+    pnpm --filter @wanman/cli standalone
+    node packages/cli/dist/wanman.mjs --help
+    ```
+
+    Platform-specific builds:
+
+    ```bash
+    pnpm --filter @wanman/cli standalone:linux   # Linux binary
+    pnpm --filter @wanman/cli standalone:all     # all platforms
+    ```
+
+    Copy the resulting file anywhere and run it with Node.js.
+  </Tab>
+</Tabs>
+
+## Verify the installation
+
+```bash
+wanman --help
+```
+
+You should see the full command listing. If you see a "command not found" error, make sure the CLI is on your `PATH` (either via `npm link` or by adding `packages/cli/dist/` to `PATH`).
+
+## Authenticate agent runtimes
+
+Wanman does not manage API keys directly — it spawns Claude Code or Codex CLI subprocesses that use their own stored auth:
+
+<Tabs>
+  <Tab title="Claude Code">
+    Install and authenticate the Claude Code CLI:
+
+    ```bash
+    npm install -g @anthropic-ai/claude-code
+    claude   # follow the login prompts
+    ```
+
+    Verify auth works:
+
+    ```bash
+    claude --version
+    ```
+  </Tab>
+  <Tab title="Codex">
+    Install and authenticate the Codex CLI:
+
+    ```bash
+    npm install -g @openai/codex
+    # Follow the Codex CLI sign-in flow
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  You only need one runtime authenticated. Wanman defaults to Claude Code. Pass `--runtime codex` to any command or set `WANMAN_RUNTIME=codex` to switch.
+</Note>
+
+## Development workflow
+
+For active development on wanman itself:
+
+```bash
+# Run typechecking across all packages
+pnpm typecheck
+
+# Run the test suite
+pnpm test
+
+# Run tests with coverage
+pnpm exec vitest run --coverage --coverage.reporter=text-summary
+```
+
+The test suite targets 90% line coverage. Coverage reports are written to `coverage/coverage-summary.json`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first agent matrix with wanman takeover.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/agents-config">
+    Configure your agent matrix with agents.json.
+  </Card>
+</CardGroup>

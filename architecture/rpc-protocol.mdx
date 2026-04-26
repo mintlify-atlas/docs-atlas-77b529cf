@@ -1,0 +1,132 @@
+---
+title: "JSON-RPC protocol reference"
+description: "Complete reference for wanman's JSON-RPC 2.0 supervisor API: all methods, error codes, and the HTTP endpoints exposed at /rpc, /health, and /events."
+---
+
+The wanman supervisor exposes a JSON-RPC 2.0 API over HTTP. The `wanman` CLI is a thin client over this API — every CLI command maps to one or more RPC calls. You can call the API directly from any HTTP client for custom integrations.
+
+## HTTP endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Returns supervisor status and per-agent state snapshot |
+| `/rpc` | POST | JSON-RPC 2.0 request/response — the main API surface |
+| `/events` | POST | External event ingress (alternative to `event.push` RPC) |
+
+The supervisor listens on `WANMAN_URL` (default `http://localhost:3120`).
+
+## JSON-RPC request format
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "agent.send",
+  "params": {
+    "to": "ceo",
+    "content": "What is the current status?",
+    "priority": "followUp"
+  }
+}
+```
+
+## RPC methods
+
+### Agent messaging
+
+| Method | Description |
+|--------|-------------|
+| `agent.send` | Send a message to an agent. Params: `to`, `content`, `priority` (`steer` or `followUp`), `from`. |
+| `agent.recv` | Receive and mark pending messages as delivered. Params: `agent`. |
+| `agent.list` | List all registered agents with their current state and lifecycle. |
+
+### Context store
+
+| Method | Description |
+|--------|-------------|
+| `context.get` | Get a context entry by key. Params: `key`. |
+| `context.set` | Set (upsert) a context entry. Params: `key`, `value`. |
+| `context.list` | List all context entries. |
+
+### Task pool
+
+| Method | Description |
+|--------|-------------|
+| `task.create` | Create a task. Params: `title`, `scope`, `after` (dependency). |
+| `task.list` | List tasks in dependency-aware order. |
+| `task.get` | Get a task by ID. |
+| `task.update` | Update task fields (status, priority, etc.). |
+| `task.done` | Mark a task as done. |
+
+### Artifact store
+
+| Method | Description |
+|--------|-------------|
+| `artifact.put` | Store an artifact. Params: `kind`, `path`, `content`, `metadata`. |
+| `artifact.list` | List artifacts, optionally filtered by `agent`. |
+| `artifact.get` | Get an artifact by ID. |
+
+### Initiatives, capsules, hypotheses
+
+| Method | Description |
+|--------|-------------|
+| `initiative.create` / `list` / `get` / `update` | CRUD for initiatives. |
+| `capsule.create` / `list` / `mine` / `get` / `update` | CRUD for change capsules. |
+| `hypothesis.create` / `list` / `update` | CRUD for hypotheses. |
+
+### Events and health
+
+| Method | Description |
+|--------|-------------|
+| `event.push` | Push an external event (same as `POST /events`). Params: `type`, `source`, `payload`. |
+| `health.check` | Returns a health snapshot over RPC. |
+
+## Error codes
+
+Wanman uses standard JSON-RPC error codes plus two custom ones:
+
+| Code | Meaning |
+|------|---------|
+| `-32700` | Parse error — invalid JSON |
+| `-32600` | Invalid request |
+| `-32601` | Method not found |
+| `-32602` | Invalid params |
+| `-32603` | Internal error |
+| `-32000` | Agent not found |
+| `-32001` | Agent not running |
+
+## Example: calling the API directly
+
+```bash
+# List all agents
+curl -s -X POST http://localhost:3120/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"1","method":"agent.list","params":{}}' | jq
+
+# Send a steer message
+curl -s -X POST http://localhost:3120/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"2","method":"agent.send","params":{"to":"ceo","content":"Pivot to auth","priority":"steer"}}' | jq
+
+# Push an external event
+curl -s -X POST http://localhost:3120/events \
+  -H "Content-Type: application/json" \
+  -d '{"type":"ci.build.failed","source":"github-actions","payload":{"branch":"main"},"timestamp":1700000000000}'
+```
+
+## Health endpoint
+
+`GET /health` returns the supervisor status and all agent states without going through JSON-RPC:
+
+```json
+{
+  "status": "ok",
+  "agents": [
+    { "name": "ceo", "state": "running", "lifecycle": "24/7" },
+    { "name": "dev", "state": "idle", "lifecycle": "on-demand" }
+  ],
+  "timestamp": "2024-01-01T12:00:00.000Z"
+}
+```
+
+This is useful for health checks in CI or monitoring scripts.

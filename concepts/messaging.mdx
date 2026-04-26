@@ -1,0 +1,107 @@
+---
+title: "Agent messaging and priorities"
+description: "Wanman's async message bus routes messages between agents with steer and follow-up priorities, backed by SQLite with delivery guarantees and no double-delivery."
+---
+
+Agents in the wanman matrix communicate through an async message bus owned by the supervisor. Every message is persisted in SQLite before the sender returns, and the bus guarantees no double-delivery. Two priority levels — `steer` and `normal` — control how urgently the recipient responds.
+
+## Message shape
+
+Every message between agents follows this structure (from `packages/core/src/types.ts`):
+
+```typescript
+interface AgentMessage {
+  id: string        // UUID
+  from: string      // sender agent name (or "system")
+  to: string        // recipient agent name
+  type: string      // 'message', 'event', 'cron'
+  payload: unknown  // structured payload
+  priority: 'steer' | 'normal'
+  timestamp: number // unix ms
+  delivered: boolean
+}
+```
+
+## Priorities
+
+| Priority | CLI flag | Effect |
+|----------|----------|--------|
+| `normal` | _(default)_ | Queued in timestamp order; handled on the agent's next loop iteration. |
+| `steer` | `--steer` | **Interrupts** the target's current subprocess (SIGKILL); next loop picks it up first. |
+
+Ordering in the database: `ORDER BY CASE priority WHEN 'steer' THEN 0 ELSE 1 END, timestamp ASC`. Steer messages always come first, then normal messages in chronological order.
+
+## Sending messages
+
+Use the `wanman send` command to place a message on an agent's inbox:
+
+```bash
+# Normal follow-up — queued, handled on next loop
+wanman send ceo "What's the current status of the API build?"
+
+# Steer — interrupts whatever ceo is currently doing
+wanman send ceo --steer "Stop everything. Pivot to security audit."
+```
+
+From inside an agent subprocess, the same command works because the `wanman` wrapper preset `WANMAN_AGENT_NAME`:
+
+```bash
+wanman send dev "Implement the /users endpoint from the spec"
+```
+
+## Steer mechanism
+
+When a `steer`-priority message arrives:
+
+```
+sender                        Relay                         target agent
+  |                             |                               |
+  |-- agent.send(steer) ------->|                               |
+  |                             |-- messageStore.enqueue() -----|
+  |                             |-- steerCallback(agent) ------>|
+  |                             |                               |-- kill(currentProcess)
+  |                             |                               |
+  |                             |                 (next loop)   |
+  |                             |                               |-- relay.recv()
+  |                             |                               |   (steer sorted first)
+  |                             |                               |-- spawnClaudeOrCodex(steerMsg)
+```
+
+The relay's steer callback tells the `AgentProcess` to SIGKILL its current Claude or Codex child. The run loop's normal respawn path picks the steer message up first because of the SQL ordering.
+
+## Receiving messages
+
+Agents automatically receive messages at the start of each run loop iteration. To inspect an agent's pending inbox from the host shell:
+
+```bash
+wanman recv              # receive messages for the default agent
+wanman recv --agent ceo  # receive messages for a specific agent
+```
+
+`recv` returns pending (`delivered = 0`) rows and marks them delivered in a single atomic transaction — no double-delivery is possible even under concurrent access.
+
+## Escalation
+
+Escalate directly to the CEO agent with a convenience command:
+
+```bash
+wanman escalate "The dev agent is stuck in a loop — please intervene"
+```
+
+This is equivalent to `wanman send ceo --steer "<msg>"`.
+
+## Delivery guarantees
+
+- Messages are written to SQLite (`messages` table) **before** `send()` returns — they survive supervisor restarts.
+- `recv()` marks messages delivered in the same transaction that returns them — no double-delivery.
+- Ordering is deterministic: steers first, then follow-ups by timestamp.
+
+## Watching live activity
+
+Stream all supervisor and agent events in real time:
+
+```bash
+wanman watch
+```
+
+This outputs a live log of message deliveries, agent state changes, and process lifecycle events.

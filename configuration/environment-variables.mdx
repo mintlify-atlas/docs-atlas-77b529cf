@@ -1,0 +1,143 @@
+---
+title: "Wanman environment variables reference"
+description: "All environment variables that control wanman CLI and supervisor behavior: runtime selection, model overrides, skill snapshots, and supervisor URL."
+---
+
+Wanman's behavior is controlled through environment variables in addition to the `agents.json` file. Variables set in the host shell are inherited by the supervisor; variables inside agent subprocesses are managed by the per-agent home isolation.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WANMAN_URL` | `http://localhost:3120` | Supervisor HTTP URL the CLI connects to |
+| `WANMAN_AGENT_NAME` | (none) | Current agent identity; preset by the wanman wrapper inside agent `$HOME` |
+| `WANMAN_RUNTIME` | `claude` | Runtime adapter: `"claude"` or `"codex"` |
+| `WANMAN_MODEL` | (runtime default) | Model override for Claude adapter |
+| `WANMAN_CODEX_MODEL` | (codex default) | Model override for Codex adapter |
+| `WANMAN_CODEX_REASONING_EFFORT` | (codex default) | Codex reasoning effort: `low`/`medium`/`high`/`xhigh` |
+| `WANMAN_CODEX_FAST` | (unset) | When set, biases Codex toward lower-latency defaults |
+| `WANMAN_SKILL_SNAPSHOTS_DIR` | `$TMPDIR/wanman-skill-snapshots` | Override skill snapshot directory |
+
+---
+
+<ParamField path="WANMAN_URL" type="string" default="http://localhost:3120">
+  The HTTP base URL the CLI uses to reach the supervisor's JSON-RPC endpoint. Change this when the supervisor is running on a different host or port, or when connecting through a tunnel.
+
+  **Accepted values:** Any valid HTTP URL.
+
+  **When to use it:** When running multiple wanman supervisors on the same machine, when the supervisor is on a remote host, or when forwarding through a reverse proxy or SSH tunnel.
+
+  ```bash
+  # Supervisor running on a non-default port
+  WANMAN_URL=http://localhost:4000 wanman agents
+
+  # Remote supervisor over SSH tunnel
+  WANMAN_URL=http://remote-host:3120 wanman send ceo "deploy staging"
+  ```
+</ParamField>
+
+<ParamField path="WANMAN_AGENT_NAME" type="string">
+  Identifies the current agent process. Used as the default sender for `wanman send` and the default receiver for `wanman recv` (so `wanman recv` without `--agent` works correctly inside an agent subprocess).
+
+  **Accepted values:** Any agent name string matching a `name` field in `agents.json`.
+
+  **When to use it:** You do not normally set this manually.
+
+  ```bash
+  # Equivalent to what the supervisor injects for the "dev" agent
+  WANMAN_AGENT_NAME=dev wanman recv
+  ```
+
+  <Note>
+    `WANMAN_AGENT_NAME` is automatically set inside agent subprocesses by the per-agent wanman wrapper. You do not normally need to set it manually.
+  </Note>
+</ParamField>
+
+<ParamField path="WANMAN_RUNTIME" type="string" default="claude">
+  Selects the CLI adapter used to spawn agent subprocesses. When set, it overrides the `runtime` field for every agent in `agents.json`.
+
+  **Accepted values:** `claude` or `codex`.
+
+  **When to use it:** To switch all agents to a different provider without editing `agents.json`, or to standardize a deployment on one provider.
+
+  ```bash
+  # Run all agents through the Codex adapter
+  WANMAN_RUNTIME=codex wanman takeover .
+
+  # Explicit default (same as omitting the variable)
+  WANMAN_RUNTIME=claude wanman takeover .
+  ```
+</ParamField>
+
+<ParamField path="WANMAN_MODEL" type="string">
+  Override the `model` field for every agent at startup. Accepts abstract tiers (`high`, `standard`) or any concrete model ID the active runtime adapter understands.
+
+  **Accepted values:** `high`, `standard`, or any model string (e.g. `claude-opus-4-5`, `qwen/qwen3.5-35b-a3b`).
+
+  **When to use it:** To pin all agents to a specific model, or to route all agents through a local LLM (e.g. LM Studio).
+
+  ```bash
+  # Force all agents to use a specific Claude model
+  WANMAN_MODEL=claude-opus-4-5 wanman takeover .
+
+  # Route all agents through a local LLM via LM Studio
+  WANMAN_MODEL=qwen/qwen3.5-35b-a3b wanman takeover .
+  ```
+</ParamField>
+
+<ParamField path="WANMAN_CODEX_MODEL" type="string">
+  Override the model for agents whose effective runtime is `codex`. Agents running Claude are unaffected.
+
+  **Accepted values:** Any model ID the Codex adapter understands (e.g. `o4-mini`).
+
+  **When to use it:** When running a mixed matrix with both Claude and Codex agents, and you want to set the Codex model without affecting Claude agents.
+
+  ```bash
+  WANMAN_RUNTIME=codex WANMAN_CODEX_MODEL=o4-mini wanman takeover .
+  ```
+</ParamField>
+
+<ParamField path="WANMAN_CODEX_REASONING_EFFORT" type="string">
+  Controls the reasoning depth and therefore the speed vs. quality trade-off for the Codex adapter.
+
+  **Accepted values:** `low`, `medium`, `high`, `xhigh`.
+
+  **When to use it:** When you want to tune Codex latency and cost explicitly, rather than relying on `WANMAN_CODEX_FAST`.
+
+  | Value | Effect |
+  |-------|--------|
+  | `low` | Fastest response, lowest token cost. Suitable for simple or mechanical tasks. |
+  | `medium` | Balanced default when `WANMAN_CODEX_FAST` is not set. |
+  | `high` | Deeper reasoning. Use for complex planning or architecture tasks. |
+  | `xhigh` | Maximum effort. Highest latency and token cost. |
+
+  ```bash
+  WANMAN_RUNTIME=codex WANMAN_CODEX_REASONING_EFFORT=high wanman takeover .
+  ```
+</ParamField>
+
+<ParamField path="WANMAN_CODEX_FAST" type="string">
+  When set to any non-empty value, biases the Codex adapter toward lower-latency defaults without requiring you to specify `WANMAN_CODEX_REASONING_EFFORT` explicitly.
+
+  **Accepted values:** Any non-empty string (conventionally `1`).
+
+  **When to use it:** When you want faster Codex responses without picking an explicit reasoning effort tier. Has no effect on the Claude adapter.
+
+  ```bash
+  WANMAN_RUNTIME=codex WANMAN_CODEX_FAST=1 wanman takeover .
+  ```
+</ParamField>
+
+<ParamField path="WANMAN_SKILL_SNAPSHOTS_DIR" type="string" default="$TMPDIR/wanman-skill-snapshots">
+  Override the directory where the runtime materializes immutable skill-activation snapshots for each agent run. Snapshots let you audit exactly which skill version an agent had available for a given task.
+
+  **Accepted values:** Any writable directory path.
+
+  **When to use it:** When you want snapshots in a persistent location for auditing, or when `$TMPDIR` is cleaned between runs.
+
+  Resolution order when this variable is not set:
+  1. A sibling of the shared-skills directory.
+  2. `$TMPDIR/wanman-skill-snapshots` as a last resort.
+
+  ```bash
+  WANMAN_SKILL_SNAPSHOTS_DIR=/var/wanman/skill-snapshots wanman takeover .
+  ```
+</ParamField>

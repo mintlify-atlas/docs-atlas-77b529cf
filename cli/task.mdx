@@ -1,0 +1,185 @@
+---
+title: "wanman task: manage the task pool"
+description: "Create, list, inspect, update, and complete tasks in the wanman task pool. Supports --after dependencies, scope paths, assignees, and initiative/capsule links."
+---
+
+The `wanman task` command manages the supervisor's task pool — a shared work queue that agents and humans use to track discrete units of work, assign ownership, declare dependencies, and transition statuses from `pending` through `done`.
+
+## Overview
+
+The task pool is a shared work queue owned by the supervisor. Any agent or the CLI can create tasks, assign them, declare dependencies, and transition them through status values.
+
+**Status values:** `pending` · `in_progress` · `done` · `blocked`
+
+`blocked` is computed automatically at display time: a task whose `--after` dependencies have not all reached `done` is shown as `blocked`.
+
+---
+
+## wanman task create
+
+```
+wanman task create <title>
+  [--assign <agent> | --assignee <agent>]
+  [--priority <1-10>]
+  [--desc <description>]
+  [--after <id1,id2>]
+  [--path <p1,p2>]
+  [--pattern <g1,g2>]
+  [--parent <id>]
+  [--initiative <id>]
+  [--capsule <id>]
+  [--subsystem <label>]
+  [--scope-type <code|docs|tests|ops|mixed>]
+  [--profile <execution-profile>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--assign` / `--assignee` | Agent to assign the task to. |
+| `--priority` | Integer 1–10; defaults to 5. Higher numbers are higher priority. |
+| `--desc` | Free-text description. |
+| `--after <id1,id2>` | Comma-separated task IDs that must reach `done` before this task can start. |
+| `--path <p1,p2>` | Comma-separated file or directory paths this task owns. |
+| `--pattern <g1,g2>` | Comma-separated glob-like path prefixes this task owns. |
+| `--parent <id>` | Parent task ID (for subtask hierarchies). |
+| `--initiative <id>` | Associate with an initiative. |
+| `--capsule <id>` | Associate with a capsule. |
+| `--subsystem <label>` | Subsystem label (e.g. `auth`, `billing`). |
+| `--scope-type` | One of `code`, `docs`, `tests`, `ops`, `mixed`. |
+| `--profile` | Execution profile hint for the agent runtime. |
+
+The creator is taken from `WANMAN_AGENT_NAME` (falls back to `cli`).
+
+### Examples
+
+```bash
+# Minimal task
+wanman task create "Write unit tests for the parser"
+
+# Assigned, prioritised task with a description
+wanman task create "Implement auth middleware" \
+  --assign dev \
+  --priority 8 \
+  --desc "JWT validation on all /api routes"
+
+# Task that depends on two others
+wanman task create "Deploy to staging" \
+  --assign devops \
+  --after abc12345,def67890
+
+# Scoped to specific paths
+wanman task create "Refactor billing module" \
+  --assign dev \
+  --path src/billing,src/payments \
+  --scope-type code
+```
+
+Output:
+
+```
+Task a1b2c3d4 created: "Write unit tests for the parser" [pending]
+```
+
+---
+
+## wanman task list
+
+```
+wanman task list
+  [--status <pending|in_progress|done|blocked>]
+  [--assignee <agent>]
+  [--initiative <id>]
+  [--capsule <id>]
+```
+
+Prints one line per task. If filters are active and any task has `--after` dependencies, the full task list is fetched to resolve dependency status accurately.
+
+### Example output
+
+```
+[pending]     a1b2c3d4 P8 "Implement auth middleware" → dev
+[blocked]     b2c3d4e5 P5 "Deploy to staging" → devops (after: abc12345,def6789)
+[in_progress] c3d4e5f6 P5 "Write unit tests" → dev
+[done]        d4e5f6a7 P5 "Design API schema" → dev
+
+4 task(s)
+```
+
+Column legend: `[status]` · short task ID · `P<priority>` · title · `→ <assignee>` · `(after: ...)` · `[I:<initiative> C:<capsule>]`.
+
+### Examples
+
+```bash
+wanman task list
+wanman task list --status pending
+wanman task list --assignee dev
+wanman task list --initiative abc12345
+```
+
+---
+
+## wanman task get
+
+```
+wanman task get <id>
+```
+
+Prints the full task record as JSON.
+
+```bash
+wanman task get a1b2c3d4
+```
+
+---
+
+## wanman task update
+
+```
+wanman task update <id>
+  [--status <status>]
+  [--assign <agent> | --assignee <agent>]
+  [--result <text>]
+  [--initiative <id>]
+  [--capsule <id>]
+  [--subsystem <label>]
+  [--scope-type <code|docs|tests|ops|mixed>]
+  [--profile <execution-profile>]
+```
+
+### Examples
+
+```bash
+# Claim a task
+wanman task update a1b2c3d4 --status in_progress
+
+# Re-assign
+wanman task update a1b2c3d4 --assignee devops
+
+# Link to an initiative
+wanman task update a1b2c3d4 --initiative b2c3d4e5
+```
+
+---
+
+## wanman task done
+
+Convenience shortcut to mark a task as `done`.
+
+```
+wanman task done <id> [result text]
+```
+
+Any text after the ID is recorded as the task result.
+
+### Examples
+
+```bash
+wanman task done a1b2c3d4
+wanman task done a1b2c3d4 "Deployed successfully to staging at 14:32"
+```
+
+Output:
+
+```
+Task a1b2c3d4 marked done.
+```
